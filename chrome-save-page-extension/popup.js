@@ -26,7 +26,7 @@ let pendingData = null;
  */
 document.addEventListener('DOMContentLoaded', () => {
   saveBtn.addEventListener('click', handleSaveClick);
-  confirmBtn.addEventListener('click', handleConfirmClick);
+  confirmBtn.addEventListener('click', () => handleConfirmClick(true));
 });
 
 /**
@@ -115,22 +115,25 @@ async function handleSaveClick() {
       throw new Error(response?.error || '页面提取失败');
     }
 
-    // 生成建议的文件名
+    // 生成建议的文件名（使用页面标题 + 时间戳）
     const folderName = sanitizeFileName(response.title || tab.title || '未命名页面');
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const baseDir = `${folderName}_${timestamp}`;
-    const suggestedName = `${baseDir}.html`;
+    const htmlFileName = `${baseDir}.html`;
 
-    // 弹出「另存为」对话框，仅保存 HTML 文件，让用户选择保存位置
-    // 使用 Chrome downloads API 的 saveAs: true
+    // 注意：Chrome 扩展的 downloads API 只能保存到默认下载目录
+    // 无法保存到用户通过 saveAs 对话框选择的任意位置
+    // 因此 HTML 和媒体资源都直接保存到默认下载目录，确保它们在同一个位置
     const htmlBlob = new Blob([response.html], { type: 'text/html;charset=utf-8' });
     const dataUrl = await blobToDataUrl(htmlBlob);
 
+    // 直接保存 HTML 文件到默认下载目录（不弹出 saveAs 对话框）
+    // 如果用户开启了「下载前询问每个文件的保存位置」，onDeterminingFilename 会处理
     const downloadId = await new Promise((resolve, reject) => {
       chrome.downloads.download({
         url: dataUrl,
-        filename: suggestedName,
-        saveAs: true // 弹出另存为对话框，让用户选择保存位置
+        filename: htmlFileName,
+        saveAs: false // 直接保存到默认下载目录
       }, (id) => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
@@ -140,27 +143,16 @@ async function handleSaveClick() {
       });
     });
 
-    // 监听下载项的变化，获取用户最终选择的文件路径
-    const downloadItem = await waitForDownloadCompletion(downloadId);
-
-    // Chrome downloads API 返回的 filename 是绝对路径（如 /home/user/Downloads/xxx.html）
-    // 但 chrome.downloads.download() 的 filename 参数只接受相对路径
-    // 因此需要从绝对路径中提取出相对于下载目录的路径
-    const userFilePath = await getRelativeDownloadPath(downloadItem);
-    const userBaseDir = userFilePath.substring(0, userFilePath.lastIndexOf('.'));
-
-    // 缓存数据，等待用户点击「确认保存」
+    // 缓存数据，直接开始下载媒体资源（无需再次点击确认）
     pendingData = {
       html: response.html,
       mediaUrls: response.mediaUrls,
-      baseDir: userBaseDir, // 用户确认后的相对路径（不含 .html 后缀）
+      baseDir: baseDir, // 使用生成的目录名作为基础路径
       downloadId: downloadId
     };
 
-    // 显示确认按钮，提示用户确认后开始下载媒体资源
-    saveBtn.style.display = 'none';
-    confirmBtn.style.display = 'block';
-    updateStatus(`HTML 已保存。点击「确认保存」开始下载 ${response.mediaUrls.length} 个媒体资源到同级 media 文件夹。`);
+    // 直接开始下载媒体资源，无需用户再次确认
+    await handleConfirmClick();
   } catch (err) {
     showError(err.message || '保存过程中发生错误');
     saveBtn.disabled = false;
@@ -168,27 +160,31 @@ async function handleSaveClick() {
 }
 
 /**
- * 处理「确认保存」按钮点击事件
- * 用户已在「另存为」对话框中确认了 HTML 的保存位置
- * 现在自动下载所有媒体资源到同级 media 文件夹，无需再次弹窗确认
+ * 下载并保存所有媒体资源
+ * 由 handleSaveClick 直接调用，无需用户再次点击确认按钮
+ * @param {boolean} fromButton - 是否由确认按钮触发（用于控制 UI 状态）
  */
-async function handleConfirmClick() {
+async function handleConfirmClick(fromButton = false) {
   if (!pendingData) {
-    showError('没有待保存的数据，请重新提取页面');
+    if (fromButton) {
+      showError('没有待保存的数据，请重新提取页面');
+    }
     return;
   }
 
-  confirmBtn.disabled = true;
+  if (fromButton) {
+    confirmBtn.disabled = true;
+  }
   progressArea.classList.add('active');
   updateStatus(`开始下载 ${pendingData.mediaUrls.length} 个媒体资源...`);
 
   try {
-    // 通过 background.js 下载所有媒体资源，使用用户确认的保存路径
+    // 通过 background.js 下载所有媒体资源
     const saveResult = await chrome.runtime.sendMessage({
       action: 'savePage',
       html: pendingData.html,
       mediaUrls: pendingData.mediaUrls,
-      baseDir: pendingData.baseDir // 传递用户确认后的实际路径
+      baseDir: pendingData.baseDir // 传递基础目录名（如 "网页标题_时间戳"）
     });
 
     if (saveResult && saveResult.success) {
@@ -199,140 +195,14 @@ async function handleConfirmClick() {
   } catch (err) {
     showError(err.message || '保存过程中发生错误');
   } finally {
-    confirmBtn.disabled = false;
+    if (fromButton) {
+      confirmBtn.disabled = false;
+    }
+    saveBtn.disabled = false;
+    saveBtn.style.display = 'block';
+    confirmBtn.style.display = 'none';
     pendingData = null;
   }
-}
-
-/**
- * 等待指定下载项完成，并返回下载项信息
- * @param {number} downloadId - 下载项 ID
- * @returns {Promise<Object>} 下载项对象
- */
-function waitForDownloadCompletion(downloadId) {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error('等待下载完成超时'));
-    }, 60000); // 60 秒超时
-
-    function onChanged(delta) {
-      if (delta.id === downloadId && delta.state && delta.state.current === 'complete') {
-        cleanup();
-        chrome.downloads.search({ id: downloadId }, (results) => {
-          if (results && results.length > 0) {
-            resolve(results[0]);
-          } else {
-            reject(new Error('无法获取下载项信息'));
-          }
-        });
-      }
-    }
-
-    function cleanup() {
-      clearTimeout(timeout);
-      chrome.downloads.onChanged.removeListener(onChanged);
-    }
-
-    chrome.downloads.onChanged.addListener(onChanged);
-
-    // 立即查询一次，可能下载已经完成
-    chrome.downloads.search({ id: downloadId }, (results) => {
-      if (results && results.length > 0 && results[0].state === 'complete') {
-        cleanup();
-        resolve(results[0]);
-      }
-    });
-  });
-}
-
-/**
- * 获取下载项相对于 Chrome 下载目录的路径
- * Chrome downloads API 返回的 filename 是绝对路径，但 download() 只接受相对路径
- * 通过 chrome.downloads.search({id}) 配合 Chrome 下载目录配置，计算相对路径
- * @param {Object} downloadItem - Chrome 下载项对象
- * @returns {Promise<string>} 相对于下载目录的文件路径（使用正斜杠 / 作为分隔符）
- */
-async function getRelativeDownloadPath(downloadItem) {
-  return new Promise((resolve) => {
-    chrome.downloads.search({ id: downloadItem.id }, (results) => {
-      if (!results || !results[0] || !results[0].filename) {
-        // 降级处理：如果无法获取信息，尝试从 downloadItem 直接取文件名
-        const fallback = downloadItem.filename || '';
-        const basename = getBasename(fallback);
-        resolve(basename);
-        return;
-      }
-
-      const fullPath = results[0].filename;
-
-      // Chrome 在 Windows 上返回的路径使用反斜杠 \，在 Linux/Mac 上使用正斜杠 /
-      // 统一转换为正斜杠处理
-      const normalizedPath = fullPath.replace(/\\/g, '/');
-
-      // 获取 Chrome 默认下载目录路径
-      // 注意：Chrome 下载目录可能和实际保存路径不同（用户可能选择了其他位置）
-      // 但 downloadItem.filename 返回的绝对路径中，下载目录之后的部分就是相对路径
-      chrome.downloads.search({ id: downloadItem.id, exists: true }, (existing) => {
-        let relativePath = normalizedPath;
-
-        if (existing && existing[0] && existing[0].filename) {
-          // 如果文件存在，尝试通过下载目录计算相对路径
-          // 由于 Chrome 扩展 API 没有直接提供下载目录路径，
-          // 我们通过分析路径结构来推断
-          const existingPath = existing[0].filename.replace(/\\/g, '/');
-
-          // 尝试找到下载目录的根：通常路径中包含 Downloads 或 下载
-          // 或者通过比较多个下载项的路径来推断
-          // 这里采用保守策略：取路径的最后两段（可能包含用户选择的子目录）
-          const parts = existingPath.split('/').filter(p => p.length > 0);
-
-          // Windows 路径以盘符开头（如 C:），Linux/Mac 以 / 开头
-          // 路径格式示例：
-          //   Linux: /home/user/Downloads/subdir/file.html
-          //   Mac:   /Users/user/Downloads/subdir/file.html
-          //   Win:   C:/Users/user/Downloads/subdir/file.html
-          // 我们需要去掉前面的系统路径，保留从下载目录开始的部分
-
-          // 查找常见的下载目录标记
-          let downloadRootIndex = -1;
-          const downloadMarkers = ['Downloads', '下载', 'download'];
-          for (let i = 0; i < parts.length; i++) {
-            const lower = parts[i].toLowerCase();
-            if (downloadMarkers.some(m => lower.includes(m))) {
-              downloadRootIndex = i;
-              break;
-            }
-          }
-
-          if (downloadRootIndex >= 0 && downloadRootIndex < parts.length - 1) {
-            // 从下载目录标记之后开始取路径
-            // 例如 /home/user/Downloads/myfolder/file.html -> myfolder/file.html
-            relativePath = parts.slice(downloadRootIndex + 1).join('/');
-          } else {
-            // 如果找不到下载目录标记，保守地取最后两段
-            // 例如 .../some/path/file.html -> path/file.html
-            relativePath = parts.slice(Math.max(0, parts.length - 2)).join('/');
-          }
-        }
-
-        resolve(relativePath);
-      });
-    });
-  });
-}
-
-/**
- * 从路径中提取文件名（basename）
- * 兼容 Windows 反斜杠和 Unix 正斜杠
- * @param {string} path - 文件路径
- * @returns {string} 文件名
- */
-function getBasename(path) {
-  if (!path) return '';
-  const normalized = path.replace(/\\/g, '/');
-  const parts = normalized.split('/');
-  return parts[parts.length - 1] || '';
 }
 
 /**

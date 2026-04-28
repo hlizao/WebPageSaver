@@ -143,10 +143,10 @@ async function handleSaveClick() {
     // 监听下载项的变化，获取用户最终选择的文件路径
     const downloadItem = await waitForDownloadCompletion(downloadId);
 
-    // 从用户选择的文件路径中解析出基础目录名
-    // Chrome downloads API 返回的 filename 是相对于下载目录的相对路径
-    // 例如 "我的网页_2023-10-01T12-00-00-000Z.html"
-    const userFilePath = downloadItem.filename;
+    // Chrome downloads API 返回的 filename 是绝对路径（如 /home/user/Downloads/xxx.html）
+    // 但 chrome.downloads.download() 的 filename 参数只接受相对路径
+    // 因此需要从绝对路径中提取出相对于下载目录的路径
+    const userFilePath = await getRelativeDownloadPath(downloadItem);
     const userBaseDir = userFilePath.substring(0, userFilePath.lastIndexOf('.'));
 
     // 缓存数据，等待用户点击「确认保存」
@@ -244,6 +244,33 @@ function waitForDownloadCompletion(downloadId) {
       }
     });
   });
+}
+
+/**
+ * 获取下载项相对于 Chrome 下载目录的路径
+ * Chrome downloads API 返回的 filename 是绝对路径，但 download() 只接受相对路径
+ * @param {Object} downloadItem - Chrome 下载项对象
+ * @returns {Promise<string>} 相对于下载目录的文件路径
+ */
+async function getRelativeDownloadPath(downloadItem) {
+  // 获取 Chrome 默认下载目录路径
+  const downloadDir = await new Promise((resolve) => {
+    chrome.downloads.search({ id: downloadItem.id }, (results) => {
+      if (results && results[0] && results[0].filename) {
+        // 从绝对路径中提取文件名部分
+        const fullPath = results[0].filename;
+        // filename 格式为：/home/user/Downloads/xxx.html（Linux/Mac）或 C:\Users\xxx\Downloads\xxx.html（Windows）
+        // 我们只需要最后一段（文件名）
+        const separator = fullPath.includes('\\') ? '\\' : '/';
+        const parts = fullPath.split(separator);
+        // 返回最后一段（文件名），作为相对路径
+        resolve(parts[parts.length - 1]);
+      } else {
+        resolve(downloadItem.filename);
+      }
+    });
+  });
+  return downloadDir;
 }
 
 /**

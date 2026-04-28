@@ -1,0 +1,326 @@
+/**
+ * content.js
+ * 内容脚本（Content Script）
+ * 注入到每个网页中，负责提取当前页面的完整 HTML 代码和所有媒体资源的 URL 列表
+ */
+
+/**
+ * 提取页面中的媒体资源 URL
+ * 包括：img 标签的 src、video 标签的 src/poster、audio 标签的 src、
+ *       背景图片（style 中的 background-image）、source 标签的 src、picture 中的 srcset
+ * @returns {string[]} 去重后的绝对 URL 数组
+ */
+function extractMediaUrls() {
+  const urls = new Set();
+
+  // 1. 提取 <img> 标签的 src 和 srcset
+  document.querySelectorAll('img').forEach((img) => {
+    if (img.src) {
+      urls.add(img.src);
+    }
+    if (img.srcset) {
+      // srcset 可能包含多个 URL，按逗号分隔
+      img.srcset.split(',').forEach((part) => {
+        const url = part.trim().split(/\s+/)[0];
+        if (url) urls.add(resolveUrl(url));
+      });
+    }
+  });
+
+  // 2. 提取 <video> 标签的 src 和 poster
+  document.querySelectorAll('video').forEach((video) => {
+    if (video.src) urls.add(video.src);
+    if (video.poster) urls.add(video.poster);
+  });
+
+  // 3. 提取 <audio> 标签的 src
+  document.querySelectorAll('audio').forEach((audio) => {
+    if (audio.src) urls.add(audio.src);
+  });
+
+  // 4. 提取 <source> 标签的 src 和 srcset（常用于 video/audio/picture 内部）
+  document.querySelectorAll('source').forEach((source) => {
+    if (source.src) urls.add(source.src);
+    if (source.srcset) {
+      source.srcset.split(',').forEach((part) => {
+        const url = part.trim().split(/\s+/)[0];
+        if (url) urls.add(resolveUrl(url));
+      });
+    }
+  });
+
+  // 5. 提取 CSS 中引用的背景图片（内联 style 和 style 标签中的样式）
+  document.querySelectorAll('*').forEach((el) => {
+    const style = window.getComputedStyle(el);
+    const bgImage = style.backgroundImage || el.style.backgroundImage;
+    extractUrlsFromCssValue(bgImage, urls);
+  });
+
+  // 6. 提取所有 <style> 标签内的 CSS 中的图片 URL
+  document.querySelectorAll('style').forEach((styleTag) => {
+    extractUrlsFromCssText(styleTag.textContent, urls);
+  });
+
+  // 7. 提取所有外部 CSS 文件中的图片 URL（通过 document.styleSheets 访问）
+  try {
+    Array.from(document.styleSheets).forEach((sheet) => {
+      try {
+        Array.from(sheet.cssRules || []).forEach((rule) => {
+          if (rule.cssText) {
+            extractUrlsFromCssText(rule.cssText, urls);
+          }
+        });
+      } catch (e) {
+        // 跨域样式表可能无法访问 cssRules，忽略错误
+      }
+    });
+  } catch (e) {
+    // 忽略样式表访问错误
+  }
+
+  // 过滤掉 data URI、javascript:、about: 等非 HTTP URL，以及重复项
+  return Array.from(urls).filter((url) => {
+    return url && (url.startsWith('http://') || url.startsWith('https://'));
+  });
+}
+
+/**
+ * 从 CSS 属性值中提取 URL（如 background-image: url("...")）
+ * @param {string} cssValue - CSS 属性值字符串
+ * @param {Set} urlSet - 用于存储 URL 的 Set
+ */
+function extractUrlsFromCssValue(cssValue, urlSet) {
+  if (!cssValue || cssValue === 'none') return;
+  // 匹配 url("...") 或 url('...') 或 url(...)
+  const regex = /url\((['"]?)(.+?)\1\)/gi;
+  let match;
+  while ((match = regex.exec(cssValue)) !== null) {
+    const url = match[2].trim();
+    if (url) {
+      urlSet.add(resolveUrl(url));
+    }
+  }
+}
+
+/**
+ * 从 CSS 文本中提取所有图片 URL
+ * @param {string} cssText - CSS 文本
+ * @param {Set} urlSet - 用于存储 URL 的 Set
+ */
+function extractUrlsFromCssText(cssText, urlSet) {
+  if (!cssText) return;
+  const regex = /url\((['"]?)(.+?)\1\)/gi;
+  let match;
+  while ((match = regex.exec(cssText)) !== null) {
+    const url = match[2].trim();
+    if (url) {
+      urlSet.add(resolveUrl(url));
+    }
+  }
+}
+
+/**
+ * 将相对 URL 解析为绝对 URL
+ * @param {string} url - 可能是相对路径的 URL
+ * @returns {string} 绝对 URL
+ */
+function resolveUrl(url) {
+  try {
+    return new URL(url, window.location.href).href;
+  } catch (e) {
+    return url;
+  }
+}
+
+/**
+ * 克隆整个文档并处理资源引用路径
+ * 1. 克隆 document.documentElement 以获取完整 HTML
+ * 2. 将所有媒体资源的 src/href 等属性中的绝对 URL 替换为相对路径（如 ./media/xxx.jpg）
+ * 3. 将 CSS 中的 url(...) 引用也替换为相对路径
+ * @param {string[]} mediaUrls - 需要替换的媒体资源绝对 URL 列表
+ * @returns {string} 处理后的完整 HTML 字符串
+ */
+function buildOfflineHtml(mediaUrls) {
+  // 深克隆整个 HTML 节点
+  const clone = document.documentElement.cloneNode(true);
+
+  // 创建 URL 到本地文件名的映射表
+  const urlToFilename = new Map();
+  mediaUrls.forEach((url) => {
+    urlToFilename.set(url, getLocalFilename(url));
+  });
+
+  // 遍历克隆树中的所有元素，替换媒体资源的引用
+  const walker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
+  let node;
+  while ((node = walker.nextNode()) !== null) {
+    replaceElementUrls(node, urlToFilename);
+  }
+
+  // 处理 <style> 标签内的 CSS 文本
+  clone.querySelectorAll('style').forEach((styleTag) => {
+    styleTag.textContent = replaceUrlsInText(styleTag.textContent, urlToFilename);
+  });
+
+  // 处理元素的内联 style 属性
+  clone.querySelectorAll('[style]').forEach((el) => {
+    el.setAttribute('style', replaceUrlsInText(el.getAttribute('style'), urlToFilename));
+  });
+
+  // 序列化为字符串
+  const doctype = document.doctype
+    ? `<!DOCTYPE ${document.doctype.name}` +
+      (document.doctype.publicId ? ` PUBLIC "${document.doctype.publicId}"` : '') +
+      (document.doctype.systemId ? ` "${document.doctype.systemId}"` : '') +
+      `>\n`
+    : '';
+
+  return doctype + clone.outerHTML;
+}
+
+/**
+ * 替换单个元素中与媒体资源相关的属性 URL
+ * @param {Element} el - DOM 元素
+ * @param {Map} urlToFilename - URL 到本地文件名的映射
+ */
+function replaceElementUrls(el, urlToFilename) {
+  const tag = el.tagName.toLowerCase();
+
+  // 处理 src 属性（img, video, audio, source, iframe 等）
+  if (el.hasAttribute('src')) {
+    const src = el.getAttribute('src');
+    const abs = resolveUrl(src);
+    if (urlToFilename.has(abs)) {
+      el.setAttribute('src', './media/' + urlToFilename.get(abs));
+    }
+  }
+
+  // 处理 srcset 属性（img, source）
+  if (el.hasAttribute('srcset')) {
+    const newSrcset = el.getAttribute('srcset').split(',').map((part) => {
+      const pieces = part.trim().split(/\s+/);
+      const url = pieces[0];
+      const abs = resolveUrl(url);
+      if (urlToFilename.has(abs)) {
+        pieces[0] = './media/' + urlToFilename.get(abs);
+      }
+      return pieces.join(' ');
+    }).join(', ');
+    el.setAttribute('srcset', newSrcset);
+  }
+
+  // 处理 poster 属性（video）
+  if (el.hasAttribute('poster')) {
+    const poster = el.getAttribute('poster');
+    const abs = resolveUrl(poster);
+    if (urlToFilename.has(abs)) {
+      el.setAttribute('poster', './media/' + urlToFilename.get(abs));
+    }
+  }
+
+  // 处理 CSS 变量或背景图片等内联样式中的 URL
+  if (el.hasAttribute('style')) {
+    el.setAttribute('style', replaceUrlsInText(el.getAttribute('style'), urlToFilename));
+  }
+}
+
+/**
+ * 在任意文本中查找并替换 URL 为本地相对路径
+ * @param {string} text - 原始文本
+ * @param {Map} urlToFilename - URL 到本地文件名的映射
+ * @returns {string} 替换后的文本
+ */
+function replaceUrlsInText(text, urlToFilename) {
+  if (!text) return text;
+  let result = text;
+  urlToFilename.forEach((filename, url) => {
+    // 使用正则全局替换，处理 url("...")、url('...')、url(...)
+    const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escaped, 'g');
+    result = result.replace(regex, './media/' + filename);
+  });
+  return result;
+}
+
+/**
+ * 根据 URL 生成本地文件名
+ * 优先使用 URL 中的原始文件名，若重名则添加序号
+ * @param {string} url - 资源 URL
+ * @returns {string} 本地文件名
+ */
+function getLocalFilename(url) {
+  try {
+    const urlObj = new URL(url);
+    // 从路径中提取文件名
+    let pathname = urlObj.pathname;
+    let filename = pathname.substring(pathname.lastIndexOf('/') + 1);
+
+    // 去除查询参数和哈希（如果文件名中包含）
+    filename = filename.split('?')[0].split('#')[0];
+
+    // 如果文件名为空或没有扩展名，使用默认名称
+    if (!filename || filename.length === 0) {
+      filename = 'resource';
+    }
+
+    // 对文件名进行安全处理，去除非法字符
+    filename = filename.replace(/[\\/:*?"<>>|]/g, '_');
+
+    // 限制文件名长度，避免过长
+    if (filename.length > 200) {
+      const ext = filename.lastIndexOf('.') > 0 ? filename.substring(filename.lastIndexOf('.')) : '';
+      filename = filename.substring(0, 200 - ext.length) + ext;
+    }
+
+    return filename;
+  } catch (e) {
+    // 如果解析失败，返回基于 URL 哈希的默认文件名
+    return 'resource_' + Math.abs(hashCode(url)) + '.bin';
+  }
+}
+
+/**
+ * 简单的字符串哈希函数，用于生成唯一标识
+ * @param {string} str - 输入字符串
+ * @returns {number} 哈希值
+ */
+function hashCode(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0; // 转为 32 位整数
+  }
+  return hash;
+}
+
+/**
+ * 监听来自 popup.js 的消息
+ * 当用户点击保存按钮时，popup.js 会发送 extractPage 消息
+ */
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'extractPage') {
+    try {
+      // 提取媒体资源 URL 列表
+      const mediaUrls = extractMediaUrls();
+
+      // 构建离线可用的 HTML（已替换资源路径）
+      const html = buildOfflineHtml(mediaUrls);
+
+      // 返回提取结果
+      sendResponse({
+        success: true,
+        html: html,
+        mediaUrls: mediaUrls,
+        title: document.title || '未命名页面'
+      });
+    } catch (err) {
+      sendResponse({
+        success: false,
+        error: err.message || '页面提取失败'
+      });
+    }
+    // 返回 true 表示会异步调用 sendResponse
+    return true;
+  }
+});

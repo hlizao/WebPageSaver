@@ -48,7 +48,27 @@ async function handleSaveClick() {
     }
 
     // 向 content script 发送消息，请求提取页面完整 HTML 和媒体资源列表
-    const response = await chrome.tabs.sendMessage(tab.id, { action: 'extractPage' });
+    // 如果 content script 未注入（如 chrome:// 页面或新打开的标签），则先注入
+    let response;
+    try {
+      response = await chrome.tabs.sendMessage(tab.id, { action: 'extractPage' });
+    } catch (err) {
+      // 可能是 content script 未加载，尝试使用 scripting.executeScript 注入并执行
+      if (err.message && err.message.includes('Receiving end does not exist')) {
+        // 通过 executeScript 在当前页面执行提取逻辑
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: extractPageInPage,
+        });
+        if (results && results[0] && results[0].result) {
+          response = results[0].result;
+        } else {
+          throw new Error('页面提取失败：无法执行内容脚本');
+        }
+      } else {
+        throw err;
+      }
+    }
 
     if (!response || !response.success) {
       throw new Error(response?.error || '页面提取失败');
@@ -279,3 +299,229 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   return false;
 });
+
+/**
+ * 在页面上下文中执行的提取函数
+ * 当 content script 未加载时，通过 chrome.scripting.executeScript 注入执行
+ * 该函数在页面隔离环境中运行，需要包含完整的提取逻辑
+ * @returns {Object} 提取结果 { success, html, mediaUrls, title }
+ */
+function extractPageInPage() {
+  // ====== 内联的提取逻辑（与 content.js 保持一致） ======
+
+  function extractMediaUrls() {
+    const urls = new Set();
+
+    // 1. 提取 <img> 标签的 src 和 srcset
+    document.querySelectorAll('img').forEach((img) => {
+      if (img.src) urls.add(img.src);
+      if (img.srcset) {
+        img.srcset.split(',').forEach((part) => {
+          const url = part.trim().split(/\s+/)[0];
+          if (url) urls.add(resolveUrl(url));
+        });
+      }
+    });
+
+    // 2. 提取 <video> 标签的 src 和 poster
+    document.querySelectorAll('video').forEach((video) => {
+      if (video.src) urls.add(video.src);
+      if (video.poster) urls.add(video.poster);
+    });
+
+    // 3. 提取 <audio> 标签的 src
+    document.querySelectorAll('audio').forEach((audio) => {
+      if (audio.src) urls.add(audio.src);
+    });
+
+    // 4. 提取 <source> 标签的 src 和 srcset
+    document.querySelectorAll('source').forEach((source) => {
+      if (source.src) urls.add(source.src);
+      if (source.srcset) {
+        source.srcset.split(',').forEach((part) => {
+          const url = part.trim().split(/\s+/)[0];
+          if (url) urls.add(resolveUrl(url));
+        });
+      }
+    });
+
+    // 5. 提取 CSS 中引用的背景图片
+    document.querySelectorAll('*').forEach((el) => {
+      const style = window.getComputedStyle(el);
+      const bgImage = style.backgroundImage || el.style.backgroundImage;
+      extractUrlsFromCssValue(bgImage, urls);
+    });
+
+    // 6. 提取 <style> 标签内的 CSS 中的图片 URL
+    document.querySelectorAll('style').forEach((styleTag) => {
+      extractUrlsFromCssText(styleTag.textContent, urls);
+    });
+
+    // 7. 提取外部 CSS 文件中的图片 URL
+    try {
+      Array.from(document.styleSheets).forEach((sheet) => {
+        try {
+          Array.from(sheet.cssRules || []).forEach((rule) => {
+            if (rule.cssText) extractUrlsFromCssText(rule.cssText, urls);
+          });
+        } catch (e) {}
+      });
+    } catch (e) {}
+
+    return Array.from(urls).filter((url) => {
+      return url && (url.startsWith('http://') || url.startsWith('https://'));
+    });
+  }
+
+  function extractUrlsFromCssValue(cssValue, urlSet) {
+    if (!cssValue || cssValue === 'none') return;
+    const regex = /url\((['"]?)(.+?)\1\)/gi;
+    let match;
+    while ((match = regex.exec(cssValue)) !== null) {
+      const url = match[2].trim();
+      if (url) urlSet.add(resolveUrl(url));
+    }
+  }
+
+  function extractUrlsFromCssText(cssText, urlSet) {
+    if (!cssText) return;
+    const regex = /url\((['"]?)(.+?)\1\)/gi;
+    let match;
+    while ((match = regex.exec(cssText)) !== null) {
+      const url = match[2].trim();
+      if (url) urlSet.add(resolveUrl(url));
+    }
+  }
+
+  function resolveUrl(url) {
+    try {
+      return new URL(url, window.location.href).href;
+    } catch (e) {
+      return url;
+    }
+  }
+
+  function getMediaCategory(filename) {
+    const ext = filename.split('.').pop().toLowerCase();
+    const pictureExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif', 'tiff'];
+    if (pictureExts.includes(ext)) return 'pictures';
+    const videoExts = ['mp4', 'webm', 'ogv', 'mov', 'mkv', 'avi', 'flv', 'm4v', '3gp'];
+    if (videoExts.includes(ext)) return 'videos';
+    const audioExts = ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'wma', 'opus'];
+    if (audioExts.includes(ext)) return 'audios';
+    return 'others';
+  }
+
+  function getLocalFilename(url) {
+    try {
+      const urlObj = new URL(url);
+      let pathname = urlObj.pathname;
+      let filename = pathname.substring(pathname.lastIndexOf('/') + 1);
+      filename = filename.split('?')[0].split('#')[0];
+      if (!filename || filename.length === 0) filename = 'resource';
+      filename = filename.replace(/[\\/:*?"<>|]/g, '_');
+      if (filename.length > 200) {
+        const ext = filename.lastIndexOf('.') > 0 ? filename.substring(filename.lastIndexOf('.')) : '';
+        filename = filename.substring(0, 200 - ext.length) + ext;
+      }
+      const category = getMediaCategory(filename);
+      return `${category}/${filename}`;
+    } catch (e) {
+      return 'others/resource_unknown.bin';
+    }
+  }
+
+  function buildOfflineHtml(mediaUrls) {
+    const clone = document.documentElement.cloneNode(true);
+    const urlToFilename = new Map();
+    mediaUrls.forEach((url) => {
+      urlToFilename.set(url, getLocalFilename(url));
+    });
+
+    const walker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
+    let node;
+    while ((node = walker.nextNode()) !== null) {
+      replaceElementUrls(node, urlToFilename);
+    }
+
+    clone.querySelectorAll('style').forEach((styleTag) => {
+      styleTag.textContent = replaceUrlsInText(styleTag.textContent, urlToFilename);
+    });
+
+    clone.querySelectorAll('[style]').forEach((el) => {
+      el.setAttribute('style', replaceUrlsInText(el.getAttribute('style'), urlToFilename));
+    });
+
+    const doctype = document.doctype
+      ? `<!DOCTYPE ${document.doctype.name}` +
+        (document.doctype.publicId ? ` PUBLIC "${document.doctype.publicId}"` : '') +
+        (document.doctype.systemId ? ` "${document.doctype.systemId}"` : '') +
+        `>\n`
+      : '';
+
+    return doctype + clone.outerHTML;
+  }
+
+  function replaceElementUrls(el, urlToFilename) {
+    if (el.hasAttribute('src')) {
+      const src = el.getAttribute('src');
+      const abs = resolveUrl(src);
+      if (urlToFilename.has(abs)) {
+        el.setAttribute('src', './media/' + urlToFilename.get(abs));
+      }
+    }
+
+    if (el.hasAttribute('srcset')) {
+      const newSrcset = el.getAttribute('srcset').split(',').map((part) => {
+        const pieces = part.trim().split(/\s+/);
+        const url = pieces[0];
+        const abs = resolveUrl(url);
+        if (urlToFilename.has(abs)) {
+          pieces[0] = './media/' + urlToFilename.get(abs);
+        }
+        return pieces.join(' ');
+      }).join(', ');
+      el.setAttribute('srcset', newSrcset);
+    }
+
+    if (el.hasAttribute('poster')) {
+      const poster = el.getAttribute('poster');
+      const abs = resolveUrl(poster);
+      if (urlToFilename.has(abs)) {
+        el.setAttribute('poster', './media/' + urlToFilename.get(abs));
+      }
+    }
+
+    if (el.hasAttribute('style')) {
+      el.setAttribute('style', replaceUrlsInText(el.getAttribute('style'), urlToFilename));
+    }
+  }
+
+  function replaceUrlsInText(text, urlToFilename) {
+    if (!text) return text;
+    let result = text;
+    urlToFilename.forEach((filename, url) => {
+      const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'g');
+      result = result.replace(regex, './media/' + filename);
+    });
+    return result;
+  }
+
+  // ====== 执行提取 ======
+  try {
+    const mediaUrls = extractMediaUrls();
+    const html = buildOfflineHtml(mediaUrls);
+    return {
+      success: true,
+      html: html,
+      mediaUrls: mediaUrls,
+      title: document.title || '未命名页面'
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message || '页面提取失败'
+    };
+  }
+}

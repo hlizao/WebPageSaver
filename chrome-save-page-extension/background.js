@@ -9,6 +9,28 @@
  */
 
 /**
+ * 全局变量：存储当前保存任务的目标目录前缀
+ * 用于 chrome.downloads.onDeterminingFilename 拦截器强制指定文件名
+ * 避免用户开启「下载前询问每个文件的保存位置」时逐个弹窗
+ */
+let currentSaveBaseDir = null;
+
+/**
+ * 监听下载事件，强制指定文件名，绕过 Chrome「下载前询问每个文件的保存位置」设置
+ * 当用户开启该设置时，即使 saveAs: false 也会逐个弹窗
+ * 通过 onDeterminingFilename 拦截并强制设置文件名，可确保静默下载
+ */
+chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
+  // 如果当前有保存任务在进行，且下载项的文件名以该任务的 baseDir 开头
+  // 说明这是本次保存任务触发的下载，强制指定文件名
+  if (currentSaveBaseDir && downloadItem.filename && downloadItem.filename.startsWith(currentSaveBaseDir)) {
+    suggest({ filename: downloadItem.filename, conflictAction: 'uniquify' });
+  } else {
+    suggest();
+  }
+});
+
+/**
  * 监听来自 popup.js 的消息
  * 当 action 为 'savePage' 时，执行完整的保存流程
  */
@@ -37,16 +59,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  * @returns {Promise<{downloadedCount: number}>} 保存结果
  */
 async function savePage(html, mediaUrls, baseDir) {
-  // 1. 先下载所有媒体资源到内存（Blob），避免 service worker 生命周期问题
-  const mediaBlobs = await downloadAllMedia(mediaUrls);
+  // 设置当前保存任务的 baseDir，用于 onDeterminingFilename 拦截器识别
+  // 这样可以绕过用户开启的「下载前询问每个文件的保存位置」设置
+  currentSaveBaseDir = baseDir;
 
-  // 2. 使用 Chrome downloads API 保存所有媒体资源到用户确认的目录下的 media 文件夹
-  // saveAs 设为 false，媒体资源下载不需要再次经过用户同意
-  const downloadedCount = await saveAllFiles(baseDir, mediaBlobs);
+  try {
+    // 1. 先下载所有媒体资源到内存（Blob），避免 service worker 生命周期问题
+    const mediaBlobs = await downloadAllMedia(mediaUrls);
 
-  return {
-    downloadedCount: downloadedCount
-  };
+    // 2. 使用 Chrome downloads API 保存所有媒体资源到用户确认的目录下的 media 文件夹
+    // saveAs 设为 false，媒体资源下载不需要再次经过用户同意
+    const downloadedCount = await saveAllFiles(baseDir, mediaBlobs);
+
+    return {
+      downloadedCount: downloadedCount
+    };
+  } finally {
+    // 保存任务结束，清空标记
+    currentSaveBaseDir = null;
+  }
 }
 
 /**

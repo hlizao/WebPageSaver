@@ -54,6 +54,15 @@
       cursor: not-allowed;
     }
 
+    #confirmBtn {
+      background: #34a853;
+      color: #fff;
+    }
+
+    #confirmBtn:hover:not(:disabled) {
+      background: #2e7d32;
+    }
+
     /* 进度区域 */
     #progressArea {
       display: none;
@@ -129,8 +138,11 @@
     点击下方按钮，将当前网页保存为完整的 HTML 文件，并自动下载所有图片、视频等媒体资源到本地 media 文件夹，确保离线后也能完整查看。
   </div>
 
-  <!-- 保存按钮 -->
+  <!-- 保存按钮：点击后先弹出另存为对话框让用户选择保存位置 -->
   <button id="saveBtn">保存当前网页</button>
+
+  <!-- 用户确认后才会显示的真实保存按钮（由 JS 控制显示） -->
+  <button id="confirmBtn" style="display:none; background:#34a853; color:#fff;">确认保存</button>
 
   <!-- 进度展示区域 -->
   <div id="progressArea">

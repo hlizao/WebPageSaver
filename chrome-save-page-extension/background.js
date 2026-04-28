@@ -138,7 +138,9 @@ async function saveAllFiles(baseDir, mediaBlobs) {
     filenameMap.set(uniqueName, true);
 
     // 构造带目录结构的文件名：baseDir/media/xxx.jpg
-    // baseDir 是用户通过「另存为」对话框确认后的实际路径前缀
+    // baseDir 是用户通过「另存为」对话框确认后的相对路径（不含 .html 后缀）
+    // 例如 baseDir = "下载/我的网页_2023-10-01T12-00-00-000Z"
+    // 则文件路径为 "下载/我的网页_2023-10-01T12-00-00-000Z/media/xxx.jpg"
     const filePath = `${baseDir}/media/${uniqueName}`;
 
     // saveAs 设为 false，媒体资源下载不需要再次经过用户同意

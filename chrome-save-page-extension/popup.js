@@ -83,8 +83,8 @@ async function handleSaveClick() {
     const downloadItem = await waitForDownloadCompletion(downloadId);
 
     // 从用户选择的文件路径中解析出基础目录名
-    // 例如用户保存到 /Download/我的网页_2023-10-01T12-00-00-000Z.html
-    // 则 media 资源应保存到 /Download/我的网页_2023-10-01T12-00-00-000Z/media/
+    // Chrome downloads API 返回的 filename 是相对于下载目录的相对路径
+    // 例如 "我的网页_2023-10-01T12-00-00-000Z.html"
     const userFilePath = downloadItem.filename;
     const userBaseDir = userFilePath.substring(0, userFilePath.lastIndexOf('.'));
 
@@ -92,7 +92,7 @@ async function handleSaveClick() {
     pendingData = {
       html: response.html,
       mediaUrls: response.mediaUrls,
-      baseDir: userBaseDir, // 用户确认后的实际保存路径（不含 .html 后缀）
+      baseDir: userBaseDir, // 用户确认后的相对路径（不含 .html 后缀）
       downloadId: downloadId
     };
 

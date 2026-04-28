@@ -249,28 +249,90 @@ function waitForDownloadCompletion(downloadId) {
 /**
  * 获取下载项相对于 Chrome 下载目录的路径
  * Chrome downloads API 返回的 filename 是绝对路径，但 download() 只接受相对路径
+ * 通过 chrome.downloads.search({id}) 配合 Chrome 下载目录配置，计算相对路径
  * @param {Object} downloadItem - Chrome 下载项对象
- * @returns {Promise<string>} 相对于下载目录的文件路径
+ * @returns {Promise<string>} 相对于下载目录的文件路径（使用正斜杠 / 作为分隔符）
  */
 async function getRelativeDownloadPath(downloadItem) {
-  // 获取 Chrome 默认下载目录路径
-  const downloadDir = await new Promise((resolve) => {
+  return new Promise((resolve) => {
     chrome.downloads.search({ id: downloadItem.id }, (results) => {
-      if (results && results[0] && results[0].filename) {
-        // 从绝对路径中提取文件名部分
-        const fullPath = results[0].filename;
-        // filename 格式为：/home/user/Downloads/xxx.html（Linux/Mac）或 C:\Users\xxx\Downloads\xxx.html（Windows）
-        // 我们只需要最后一段（文件名）
-        const separator = fullPath.includes('\\') ? '\\' : '/';
-        const parts = fullPath.split(separator);
-        // 返回最后一段（文件名），作为相对路径
-        resolve(parts[parts.length - 1]);
-      } else {
-        resolve(downloadItem.filename);
+      if (!results || !results[0] || !results[0].filename) {
+        // 降级处理：如果无法获取信息，尝试从 downloadItem 直接取文件名
+        const fallback = downloadItem.filename || '';
+        const basename = getBasename(fallback);
+        resolve(basename);
+        return;
       }
+
+      const fullPath = results[0].filename;
+
+      // Chrome 在 Windows 上返回的路径使用反斜杠 \，在 Linux/Mac 上使用正斜杠 /
+      // 统一转换为正斜杠处理
+      const normalizedPath = fullPath.replace(/\\/g, '/');
+
+      // 获取 Chrome 默认下载目录路径
+      // 注意：Chrome 下载目录可能和实际保存路径不同（用户可能选择了其他位置）
+      // 但 downloadItem.filename 返回的绝对路径中，下载目录之后的部分就是相对路径
+      chrome.downloads.search({ id: downloadItem.id, exists: true }, (existing) => {
+        let relativePath = normalizedPath;
+
+        if (existing && existing[0] && existing[0].filename) {
+          // 如果文件存在，尝试通过下载目录计算相对路径
+          // 由于 Chrome 扩展 API 没有直接提供下载目录路径，
+          // 我们通过分析路径结构来推断
+          const existingPath = existing[0].filename.replace(/\\/g, '/');
+
+          // 尝试找到下载目录的根：通常路径中包含 Downloads 或 下载
+          // 或者通过比较多个下载项的路径来推断
+          // 这里采用保守策略：取路径的最后两段（可能包含用户选择的子目录）
+          const parts = existingPath.split('/').filter(p => p.length > 0);
+
+          // Windows 路径以盘符开头（如 C:），Linux/Mac 以 / 开头
+          // 路径格式示例：
+          //   Linux: /home/user/Downloads/subdir/file.html
+          //   Mac:   /Users/user/Downloads/subdir/file.html
+          //   Win:   C:/Users/user/Downloads/subdir/file.html
+          // 我们需要去掉前面的系统路径，保留从下载目录开始的部分
+
+          // 查找常见的下载目录标记
+          let downloadRootIndex = -1;
+          const downloadMarkers = ['Downloads', '下载', 'download'];
+          for (let i = 0; i < parts.length; i++) {
+            const lower = parts[i].toLowerCase();
+            if (downloadMarkers.some(m => lower.includes(m))) {
+              downloadRootIndex = i;
+              break;
+            }
+          }
+
+          if (downloadRootIndex >= 0 && downloadRootIndex < parts.length - 1) {
+            // 从下载目录标记之后开始取路径
+            // 例如 /home/user/Downloads/myfolder/file.html -> myfolder/file.html
+            relativePath = parts.slice(downloadRootIndex + 1).join('/');
+          } else {
+            // 如果找不到下载目录标记，保守地取最后两段
+            // 例如 .../some/path/file.html -> path/file.html
+            relativePath = parts.slice(Math.max(0, parts.length - 2)).join('/');
+          }
+        }
+
+        resolve(relativePath);
+      });
     });
   });
-  return downloadDir;
+}
+
+/**
+ * 从路径中提取文件名（basename）
+ * 兼容 Windows 反斜杠和 Unix 正斜杠
+ * @param {string} path - 文件路径
+ * @returns {string} 文件名
+ */
+function getBasename(path) {
+  if (!path) return '';
+  const normalized = path.replace(/\\/g, '/');
+  const parts = normalized.split('/');
+  return parts[parts.length - 1] || '';
 }
 
 /**

@@ -243,10 +243,14 @@ function replaceUrlsInText(text, urlToFilename) {
 }
 
 /**
- * 根据 URL 生成本地文件名
- * 优先使用 URL 中的原始文件名，若重名则添加序号
+ * 根据 URL 和媒体类型生成本地文件路径
+ * 按媒体类型分类保存到不同子目录：
+ *   - pictures: 图片（jpg, jpeg, png, gif, webp, svg, bmp, ico）
+ *   - videos: 视频（mp4, webm, ogv, mov）
+ *   - audios: 音频（mp3, wav, ogg, m4a, flac, aac）
+ *   - others: 其他类型
  * @param {string} url - 资源 URL
- * @returns {string} 本地文件名
+ * @returns {string} 本地相对文件路径（如 pictures/xxx.jpg）
  */
 function getLocalFilename(url) {
   try {
@@ -272,11 +276,43 @@ function getLocalFilename(url) {
       filename = filename.substring(0, 200 - ext.length) + ext;
     }
 
-    return filename;
+    // 根据扩展名判断媒体类型，并添加分类目录前缀
+    const category = getMediaCategory(filename);
+    return `${category}/${filename}`;
   } catch (e) {
-    // 如果解析失败，返回基于 URL 哈希的默认文件名
-    return 'resource_' + Math.abs(hashCode(url)) + '.bin';
+    // 如果解析失败，返回基于 URL 哈希的默认文件名，归类到 others
+    return 'others/resource_' + Math.abs(hashCode(url)) + '.bin';
   }
+}
+
+/**
+ * 根据文件名扩展名判断媒体类型分类
+ * @param {string} filename - 文件名
+ * @returns {string} 分类目录名（pictures / videos / audios / others）
+ */
+function getMediaCategory(filename) {
+  const ext = filename.split('.').pop().toLowerCase();
+
+  // 图片类型
+  const pictureExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif', 'tiff'];
+  if (pictureExts.includes(ext)) {
+    return 'pictures';
+  }
+
+  // 视频类型
+  const videoExts = ['mp4', 'webm', 'ogv', 'mov', 'mkv', 'avi', 'flv', 'm4v', '3gp'];
+  if (videoExts.includes(ext)) {
+    return 'videos';
+  }
+
+  // 音频类型
+  const audioExts = ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'wma', 'opus'];
+  if (audioExts.includes(ext)) {
+    return 'audios';
+  }
+
+  // 无法识别的类型归类到 others
+  return 'others';
 }
 
 /**

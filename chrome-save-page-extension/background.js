@@ -137,10 +137,11 @@ async function saveAllFiles(baseDir, mediaBlobs) {
     }
     filenameMap.set(uniqueName, true);
 
-    // 构造带目录结构的文件名：baseDir/media/xxx.jpg
+    // 构造带目录结构的文件名：baseDir/media/pictures/xxx.jpg
     // baseDir 是用户通过「另存为」对话框确认后的相对路径（不含 .html 后缀）
+    // uniqueName 已包含分类子目录，如 "pictures/xxx.jpg"
     // 例如 baseDir = "下载/我的网页_2023-10-01T12-00-00-000Z"
-    // 则文件路径为 "下载/我的网页_2023-10-01T12-00-00-000Z/media/xxx.jpg"
+    // 则文件路径为 "下载/我的网页_2023-10-01T12-00-00-000Z/media/pictures/xxx.jpg"
     const filePath = `${baseDir}/media/${uniqueName}`;
 
     // saveAs 设为 false，媒体资源下载不需要再次经过用户同意
@@ -201,9 +202,14 @@ async function notifyProgress(current, total, status) {
 }
 
 /**
- * 根据 URL 生成本地文件名（与 content.js 中的逻辑保持一致）
+ * 根据 URL 和媒体类型生成本地文件路径（与 content.js 中的逻辑保持一致）
+ * 按媒体类型分类保存到不同子目录：
+ *   - pictures: 图片（jpg, jpeg, png, gif, webp, svg, bmp, ico）
+ *   - videos: 视频（mp4, webm, ogv, mov）
+ *   - audios: 音频（mp3, wav, ogg, m4a, flac, aac）
+ *   - others: 其他类型
  * @param {string} url - 资源 URL
- * @returns {string} 本地文件名
+ * @returns {string} 本地相对文件路径（如 pictures/xxx.jpg）
  */
 function getLocalFilename(url) {
   try {
@@ -219,10 +225,43 @@ function getLocalFilename(url) {
       const ext = filename.lastIndexOf('.') > 0 ? filename.substring(filename.lastIndexOf('.')) : '';
       filename = filename.substring(0, 200 - ext.length) + ext;
     }
-    return filename;
+
+    // 根据扩展名判断媒体类型，并添加分类目录前缀
+    const category = getMediaCategory(filename);
+    return `${category}/${filename}`;
   } catch (e) {
-    return 'resource_' + Math.abs(hashCode(url)) + '.bin';
+    return 'others/resource_' + Math.abs(hashCode(url)) + '.bin';
   }
+}
+
+/**
+ * 根据文件名扩展名判断媒体类型分类
+ * @param {string} filename - 文件名
+ * @returns {string} 分类目录名（pictures / videos / audios / others）
+ */
+function getMediaCategory(filename) {
+  const ext = filename.split('.').pop().toLowerCase();
+
+  // 图片类型
+  const pictureExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif', 'tiff'];
+  if (pictureExts.includes(ext)) {
+    return 'pictures';
+  }
+
+  // 视频类型
+  const videoExts = ['mp4', 'webm', 'ogv', 'mov', 'mkv', 'avi', 'flv', 'm4v', '3gp'];
+  if (videoExts.includes(ext)) {
+    return 'videos';
+  }
+
+  // 音频类型
+  const audioExts = ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'wma', 'opus'];
+  if (audioExts.includes(ext)) {
+    return 'audios';
+  }
+
+  // 无法识别的类型归类到 others
+  return 'others';
 }
 
 /**

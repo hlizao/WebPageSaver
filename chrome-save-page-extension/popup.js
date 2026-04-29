@@ -12,6 +12,7 @@
 // DOM 元素引用
 const saveBtn = document.getElementById('saveBtn');
 const confirmBtn = document.getElementById('confirmBtn');
+const openFolderBtn = document.getElementById('openFolderBtn');
 const progressArea = document.getElementById('progressArea');
 const progressBar = document.getElementById('progressBar');
 const progressCount = document.getElementById('progressCount');
@@ -21,12 +22,16 @@ const resultArea = document.getElementById('resultArea');
 // 缓存提取到的页面数据，供用户确认后使用
 let pendingData = null;
 
+// 缓存保存完成后的目录路径，用于打开文件夹
+let savedFolderPath = null;
+
 /**
  * 初始化：绑定按钮点击事件
  */
 document.addEventListener('DOMContentLoaded', () => {
   saveBtn.addEventListener('click', handleSaveClick);
   confirmBtn.addEventListener('click', () => handleConfirmClick(true));
+  openFolderBtn.addEventListener('click', handleOpenFolder);
 });
 
 /**
@@ -192,7 +197,11 @@ async function handleConfirmClick(fromButton = false) {
     });
 
     if (saveResult && saveResult.success) {
-      showSuccess(`保存成功！\n媒体资源：${saveResult.downloadedCount} 个已下载到同级 media 文件夹`);
+      // 记录保存的文件夹路径，用于打开文件夹
+      savedFolderPath = pendingData.baseDir;
+      showSuccess(`保存成功！\n媒体资源：${saveResult.downloadedCount} 个已下载`);
+      // 显示打开文件夹按钮
+      openFolderBtn.style.display = 'block';
     } else {
       throw new Error(saveResult?.error || '保存失败');
     }
@@ -206,6 +215,34 @@ async function handleConfirmClick(fromButton = false) {
     saveBtn.style.display = 'block';
     confirmBtn.style.display = 'none';
     pendingData = null;
+  }
+}
+
+/**
+ * 处理「打开保存文件夹」按钮点击事件
+ * 使用 Chrome downloads API 打开保存的文件夹
+ */
+async function handleOpenFolder() {
+  if (!savedFolderPath) {
+    showError('无法获取保存路径');
+    return;
+  }
+
+  try {
+    // 通过搜索下载项来找到文件夹并打开
+    // 搜索以 savedFolderPath 开头的文件，然后打开其所在文件夹
+    chrome.downloads.search({
+      filenameRegex: '^' + savedFolderPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '.*'
+    }, (results) => {
+      if (results && results.length > 0) {
+        // 打开第一个匹配项的文件夹
+        chrome.downloads.show(results[0].id);
+      } else {
+        showError('未找到保存的文件夹');
+      }
+    });
+  } catch (err) {
+    showError('打开文件夹失败：' + err.message);
   }
 }
 
@@ -253,6 +290,8 @@ function resetUI() {
   progressArea.classList.remove('active');
   saveBtn.style.display = 'block';
   confirmBtn.style.display = 'none';
+  openFolderBtn.style.display = 'none';
+  savedFolderPath = null;
 }
 
 /**

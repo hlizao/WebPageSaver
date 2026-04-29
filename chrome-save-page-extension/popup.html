@@ -63,6 +63,15 @@
       background: #2e7d32;
     }
 
+    #openFolderBtn {
+      background: #fbbc04;
+      color: #333;
+    }
+
+    #openFolderBtn:hover:not(:disabled) {
+      background: #f9a825;
+    }
+
     /* 进度区域 */
     #progressArea {
       display: none;
@@ -143,6 +152,9 @@
 
   <!-- 用户确认后才会显示的真实保存按钮（由 JS 控制显示） -->
   <button id="confirmBtn" style="display:none; background:#34a853; color:#fff;">确认保存</button>
+
+  <!-- 下载完成后显示的打开文件夹按钮 -->
+  <button id="openFolderBtn" style="display:none;">打开保存文件夹</button>
 
   <!-- 进度展示区域 -->
   <div id="progressArea">

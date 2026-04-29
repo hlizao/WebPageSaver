@@ -23,14 +23,8 @@ let currentSaveBaseDir = null;
 chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
   // 如果当前有保存任务在进行，且下载项的文件名以该任务的 baseDir 开头
   // 说明这是本次保存任务触发的下载，强制指定文件名
-  if (currentSaveBaseDir && downloadItem.filename && downloadItem.filename.startsWith(currentSaveBaseDir)) {
-    // 只对媒体资源文件强制指定文件名（路径中包含 /media/）
-    // HTML 文件（以 .html 结尾）不干预，避免修改其扩展名
-    if (downloadItem.filename.includes('/media/')) {
-      suggest({ filename: downloadItem.filename, conflictAction: 'uniquify' });
-    } else {
-      suggest();
-    }
+  if (currentSaveBaseDir && downloadItem.filename && downloadItem.filename.startsWith(currentSaveBaseDir + '/')) {
+    suggest({ filename: downloadItem.filename, conflictAction: 'uniquify' });
   } else {
     suggest();
   }

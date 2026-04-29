@@ -115,19 +115,23 @@ async function handleSaveClick() {
       throw new Error(response?.error || '页面提取失败');
     }
 
-    // 生成建议的文件名（使用页面标题 + 时间戳）
+    // 生成建议的目录名（使用页面标题 + 时间戳）
     const folderName = sanitizeFileName(response.title || tab.title || '未命名页面');
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const baseDir = `${folderName}_${timestamp}`;
-    const htmlFileName = `${baseDir}.html`;
+    const saveDir = `${folderName}_${timestamp}`;
+
+    // Chrome downloads API 的 filename 参数支持通过斜杠模拟目录结构
+    // 例如 filename: "myfolder/index.html" 会自动创建 myfolder 目录
+    // 因此将 HTML 文件保存到 saveDir 目录下
+    const htmlFileName = `${saveDir}/${saveDir}.html`;
 
     // 注意：Chrome 扩展的 downloads API 只能保存到默认下载目录
     // 无法保存到用户通过 saveAs 对话框选择的任意位置
-    // 因此 HTML 和媒体资源都直接保存到默认下载目录，确保它们在同一个位置
+    // 因此 HTML 和媒体资源都直接保存到默认下载目录下的 saveDir 子目录中
     const htmlBlob = new Blob([response.html], { type: 'text/html;charset=utf-8' });
     const dataUrl = await blobToDataUrl(htmlBlob);
 
-    // 直接保存 HTML 文件到默认下载目录（不弹出 saveAs 对话框）
+    // 直接保存 HTML 文件到默认下载目录下的 saveDir 子目录中
     // 如果用户开启了「下载前询问每个文件的保存位置」，onDeterminingFilename 会处理
     const downloadId = await new Promise((resolve, reject) => {
       chrome.downloads.download({
@@ -147,7 +151,7 @@ async function handleSaveClick() {
     pendingData = {
       html: response.html,
       mediaUrls: response.mediaUrls,
-      baseDir: baseDir, // 使用生成的目录名作为基础路径
+      baseDir: saveDir, // 使用 saveDir 作为基础路径，媒体资源将保存到 saveDir/media/ 下
       downloadId: downloadId
     };
 

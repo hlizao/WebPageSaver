@@ -19,11 +19,12 @@ let currentSaveBaseDir = null;
  * 监听下载事件，强制指定文件名，绕过 Chrome「下载前询问每个文件的保存位置」设置
  * 当用户开启该设置时，即使 saveAs: false 也会逐个弹窗
  * 通过 onDeterminingFilename 拦截并强制设置文件名，可确保静默下载
+ * 注意：必须立即调用 suggest()，不能异步操作
  */
 chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
-  // 如果当前有保存任务在进行，且下载项的文件名以该任务的 baseDir 开头
-  // 说明这是本次保存任务触发的下载，强制指定文件名
+  // 同步判断：如果当前有保存任务在进行，且下载项的文件名以该任务的 baseDir 开头
   if (currentSaveBaseDir && downloadItem.filename && downloadItem.filename.startsWith(currentSaveBaseDir + '/')) {
+    // 立即同步调用 suggest，避免异步操作导致的问题
     suggest({ filename: downloadItem.filename, conflictAction: 'uniquify' });
   } else {
     suggest();
@@ -142,6 +143,7 @@ async function fetchMediaAsBlob(url) {
  * 保存所有媒体资源文件到本地
  * 使用 Chrome downloads API，将资源保存到用户已确认目录的 media 子文件夹中
  * 此处 saveAs 设为 false，不需要再次弹窗让用户确认
+ * 为避免 Chrome 崩溃，限制并发下载数量并添加延迟
  * @param {string} baseDir - 用户确认后的基础目录路径（不含 .html 后缀）
  * @param {Array<{url: string, blob: Blob|null, filename: string}>} mediaBlobs - 媒体资源列表
  * @returns {Promise<number>} 成功保存的资源数量
@@ -152,6 +154,10 @@ async function saveAllFiles(baseDir, mediaBlobs) {
   // 保存媒体资源到 media 子文件夹
   // Chrome downloads API 不支持直接创建文件夹，我们通过文件名中的斜杠来模拟目录结构
   const filenameMap = new Map(); // 用于处理重名文件
+
+  // 限制并发下载数量，避免 Chrome 下载管理器崩溃
+  const CONCURRENT_DOWNLOADS = 5;
+  const queue = [];
 
   for (const item of mediaBlobs) {
     if (!item.blob) continue; // 下载失败的跳过
@@ -169,18 +175,45 @@ async function saveAllFiles(baseDir, mediaBlobs) {
     filenameMap.set(uniqueName, true);
 
     // 构造带目录结构的文件名：baseDir/media/pictures/xxx.jpg
-    // baseDir 是用户通过「另存为」对话框确认后的相对路径（不含 .html 后缀）
-    // uniqueName 已包含分类子目录，如 "pictures/xxx.jpg"
-    // 例如 baseDir = "下载/我的网页_2023-10-01T12-00-00-000Z"
-    // 则文件路径为 "下载/我的网页_2023-10-01T12-00-00-000Z/media/pictures/xxx.jpg"
     const filePath = `${baseDir}/media/${uniqueName}`;
 
-    // saveAs 设为 false，媒体资源下载不需要再次经过用户同意
-    await saveBlobToFile(item.blob, filePath, false);
-    downloadedCount++;
+    // 使用队列控制并发数量
+    const downloadPromise = saveBlobToFile(item.blob, filePath, false).then(() => {
+      downloadedCount++;
+      // 每完成一个下载，从队列中移除
+      const index = queue.indexOf(downloadPromise);
+      if (index > -1) queue.splice(index, 1);
+    }).catch((err) => {
+      console.warn(`保存文件失败: ${filePath}`, err);
+      // 从队列中移除失败的下载
+      const index = queue.indexOf(downloadPromise);
+      if (index > -1) queue.splice(index, 1);
+    });
+
+    queue.push(downloadPromise);
+
+    // 当并发数量达到上限时，等待任意一个下载完成
+    if (queue.length >= CONCURRENT_DOWNLOADS) {
+      await Promise.race(queue);
+    }
+
+    // 添加小延迟，避免瞬间发起大量下载请求
+    await delay(50);
   }
 
+  // 等待所有剩余的下载完成
+  await Promise.all(queue);
+
   return downloadedCount;
+}
+
+/**
+ * 延迟函数
+ * @param {number} ms - 延迟毫秒数
+ * @returns {Promise<void>}
+ */
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
@@ -192,23 +225,37 @@ async function saveAllFiles(baseDir, mediaBlobs) {
  */
 function saveBlobToFile(blob, filename, saveAs = false) {
   return new Promise((resolve, reject) => {
+    // 设置超时，避免 FileReader 或 downloads.download 卡住
+    const timeout = setTimeout(() => {
+      reject(new Error('保存文件超时'));
+    }, 30000); // 30 秒超时
+
     // 将 Blob 转为 data URL，供 Chrome downloads API 使用
     const reader = new FileReader();
     reader.onloadend = () => {
-      const dataUrl = reader.result;
-      chrome.downloads.download({
-        url: dataUrl,
-        filename: filename,
-        saveAs: saveAs // false 表示不弹出另存为对话框，直接保存
-      }, (downloadId) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else {
-          resolve(downloadId);
-        }
-      });
+      try {
+        const dataUrl = reader.result;
+        chrome.downloads.download({
+          url: dataUrl,
+          filename: filename,
+          saveAs: saveAs // false 表示不弹出另存为对话框，直接保存
+        }, (downloadId) => {
+          clearTimeout(timeout);
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve(downloadId);
+          }
+        });
+      } catch (err) {
+        clearTimeout(timeout);
+        reject(err);
+      }
     };
-    reader.onerror = () => reject(reader.error);
+    reader.onerror = () => {
+      clearTimeout(timeout);
+      reject(reader.error);
+    };
     reader.readAsDataURL(blob);
   });
 }

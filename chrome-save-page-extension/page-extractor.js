@@ -101,6 +101,24 @@ function extractMediaUrls() {
     // 忽略样式表访问错误
   }
 
+  // 8. 提取外部 CSS 文件链接（link[rel="stylesheet"]）
+  // 这些文件会被下载并内联到 HTML 中，避免离线时发起联网请求
+  document.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {
+    if (link.href) urls.add(link.href);
+  });
+
+  // 9. 提取外部 JS 文件（script[src]）
+  // 这些文件会被下载并替换为本地引用
+  document.querySelectorAll('script[src]').forEach((script) => {
+    if (script.src) urls.add(script.src);
+  });
+
+  // 10. 提取 iframe、embed、object 等嵌入资源的 URL
+  document.querySelectorAll('iframe[src], embed[src], object[data]').forEach((el) => {
+    if (el.src) urls.add(el.src);
+    if (el.getAttribute('data')) urls.add(resolveUrl(el.getAttribute('data')));
+  });
+
   // 过滤掉 data URI、javascript:、about: 等非 HTTP URL，以及重复项
   return Array.from(urls).filter((url) => {
     return url && (url.startsWith('http://') || url.startsWith('https://'));
@@ -209,12 +227,22 @@ function buildOfflineHtml(mediaUrls) {
 function replaceElementUrls(el, urlToFilename) {
   const tag = el.tagName.toLowerCase();
 
-  // 处理 src 属性（img, video, audio, source, iframe 等）
+  // 处理 src 属性（img, video, audio, source, iframe, embed, object 等）
   if (el.hasAttribute('src')) {
     const src = el.getAttribute('src');
     const abs = resolveUrl(src);
     if (urlToFilename.has(abs)) {
       el.setAttribute('src', './media/' + urlToFilename.get(abs));
+    }
+  }
+
+  // 处理 href 属性（link[stylesheet], a, area 等）
+  // 主要处理外部 CSS 文件，避免页面加载外部样式时发起联网请求
+  if (el.hasAttribute('href')) {
+    const href = el.getAttribute('href');
+    const abs = resolveUrl(href);
+    if (urlToFilename.has(abs)) {
+      el.setAttribute('href', './media/' + urlToFilename.get(abs));
     }
   }
 
@@ -238,6 +266,15 @@ function replaceElementUrls(el, urlToFilename) {
     const abs = resolveUrl(poster);
     if (urlToFilename.has(abs)) {
       el.setAttribute('poster', './media/' + urlToFilename.get(abs));
+    }
+  }
+
+  // 处理 data 属性（object）
+  if (el.hasAttribute('data')) {
+    const data = el.getAttribute('data');
+    const abs = resolveUrl(data);
+    if (urlToFilename.has(abs)) {
+      el.setAttribute('data', './media/' + urlToFilename.get(abs));
     }
   }
 
@@ -311,7 +348,7 @@ function getLocalFilename(url) {
 /**
  * 根据文件名扩展名判断媒体类型分类
  * @param {string} filename - 文件名
- * @returns {string} 分类目录名（pictures / videos / audios / others）
+ * @returns {string} 分类目录名（pictures / videos / audios / styles / scripts / others）
  */
 function getMediaCategory(filename) {
   const ext = filename.split('.').pop().toLowerCase();
@@ -332,6 +369,18 @@ function getMediaCategory(filename) {
   const audioExts = ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'wma', 'opus'];
   if (audioExts.includes(ext)) {
     return 'audios';
+  }
+
+  // 样式表类型（CSS）
+  const styleExts = ['css', 'less', 'scss', 'sass'];
+  if (styleExts.includes(ext)) {
+    return 'styles';
+  }
+
+  // 脚本类型（JS）
+  const scriptExts = ['js', 'mjs', 'jsx', 'ts', 'tsx'];
+  if (scriptExts.includes(ext)) {
+    return 'scripts';
   }
 
   // 无法识别的类型归类到 others

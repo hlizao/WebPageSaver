@@ -24,7 +24,13 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
   // 如果当前有保存任务在进行，且下载项的文件名以该任务的 baseDir 开头
   // 说明这是本次保存任务触发的下载，强制指定文件名
   if (currentSaveBaseDir && downloadItem.filename && downloadItem.filename.startsWith(currentSaveBaseDir)) {
-    suggest({ filename: downloadItem.filename, conflictAction: 'uniquify' });
+    // 只对媒体资源文件强制指定文件名（路径中包含 /media/）
+    // HTML 文件（以 .html 结尾）不干预，避免修改其扩展名
+    if (downloadItem.filename.includes('/media/')) {
+      suggest({ filename: downloadItem.filename, conflictAction: 'uniquify' });
+    } else {
+      suggest();
+    }
   } else {
     suggest();
   }
@@ -268,7 +274,7 @@ function getLocalFilename(url) {
 /**
  * 根据文件名扩展名判断媒体类型分类
  * @param {string} filename - 文件名
- * @returns {string} 分类目录名（pictures / videos / audios / others）
+ * @returns {string} 分类目录名（pictures / videos / audios / styles / scripts / others）
  */
 function getMediaCategory(filename) {
   const ext = filename.split('.').pop().toLowerCase();
@@ -289,6 +295,18 @@ function getMediaCategory(filename) {
   const audioExts = ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'wma', 'opus'];
   if (audioExts.includes(ext)) {
     return 'audios';
+  }
+
+  // 样式表类型（CSS）
+  const styleExts = ['css', 'less', 'scss', 'sass'];
+  if (styleExts.includes(ext)) {
+    return 'styles';
+  }
+
+  // 脚本类型（JS）
+  const scriptExts = ['js', 'mjs', 'jsx', 'ts', 'tsx'];
+  if (scriptExts.includes(ext)) {
+    return 'scripts';
   }
 
   // 无法识别的类型归类到 others

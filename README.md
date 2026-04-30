@@ -59,7 +59,7 @@ chrome-save-page-extension/
 
 ```bash
 # 使用 git 克隆本项目
-git clone <your-repo-url> chrome-save-page-extension
+git clone https://github.com/hlizao/WebPageSaver.git
 
 # 进入项目目录
 cd chrome-save-page-extension

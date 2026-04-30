@@ -85,7 +85,7 @@ cd WebPageSaver
    下载目录/
    └── WebPageSaver/
        ├── 页面标题.html
-       └── media/
+       └── 页面标题_media/
            ├── pictures/
            │   ├── cover.jpg
            │   ├── avatar_small.png       # CDN @后缀自动转换

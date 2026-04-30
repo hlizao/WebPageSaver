@@ -1,5 +1,4 @@
 const saveBtn = document.getElementById('saveBtn');
-const saveBtnText = document.getElementById('saveBtnText');
 const openFolderBtn = document.getElementById('openFolderBtn');
 const newSaveBtn = document.getElementById('newSaveBtn');
 const progressArea = document.getElementById('progressArea');
@@ -14,6 +13,7 @@ const statMedia = document.getElementById('statMedia');
 const statImages = document.getElementById('statImages');
 const statOthers = document.getElementById('statOthers');
 
+const ROOT_DIR = 'WebPageSaver';
 let pendingData = null;
 let savedDownloadId = null;
 
@@ -63,15 +63,15 @@ async function handleSaveClick() {
     statImages.textContent = imgCount;
     statOthers.textContent = total - imgCount;
 
-    const folderName = sanitizeFileName(response.title || tab.title || '未命名页面');
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const saveDir = `${folderName}_${timestamp}`;
-    const htmlFileName = `${saveDir}/${saveDir}.html`;
+    const pageName = sanitizeFileName(response.title || tab.title || '未命名页面');
+    const mediaDirName = pageName + '_media';
+    const htmlFileName = ROOT_DIR + '/' + pageName + '.html';
 
     pendingData = {
       html: response.html,
       mediaUrls: response.mediaUrls,
-      baseDir: saveDir
+      baseDir: ROOT_DIR,
+      mediaDirName: mediaDirName
     };
 
     showProgress(true);
@@ -95,20 +95,21 @@ async function handleSaveClick() {
     savedDownloadId = htmlDownloadId;
 
     setProgress(1, total + 1);
-    setProgressLabel(`已保存 HTML，开始下载 ${total} 个媒体资源...`);
-    setStatus(`正在下载 0 / ${total}`);
+    setProgressLabel('已保存 HTML，开始下载 ' + total + ' 个媒体资源...');
+    setStatus('正在下载 0 / ' + total);
 
     const saveResult = await chrome.runtime.sendMessage({
       action: 'savePage',
       html: response.html,
       mediaUrls: response.mediaUrls,
-      baseDir: saveDir
+      baseDir: ROOT_DIR,
+      mediaDirName: mediaDirName
     });
 
     if (saveResult && saveResult.success) {
       setProgress(total + 1, total + 1);
       setProgressLabel('保存完成');
-      showResult('success', `保存成功！HTML 文件 + ${saveResult.downloadedCount} 个资源已下载`);
+      showResult('success', '保存成功！HTML 文件 + ' + saveResult.downloadedCount + ' 个资源已下载');
       openFolderBtn.classList.remove('hidden');
       newSaveBtn.classList.remove('hidden');
     } else {
@@ -125,9 +126,26 @@ async function handleSaveClick() {
 async function handleOpenFolder() {
   if (savedDownloadId) {
     try {
+      chrome.downloads.search({ id: savedDownloadId }, (items) => {
+        if (items && items.length > 0) {
+          const htmlPath = items[0].filename;
+          const dir = htmlPath.substring(0, htmlPath.lastIndexOf('/'));
+          chrome.downloads.search({
+            filenameRegex: '^' + dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '.*'
+          }, (mediaItems) => {
+            if (mediaItems && mediaItems.length > 0) {
+              chrome.downloads.show(mediaItems[mediaItems.length - 1].id);
+            } else {
+              chrome.downloads.show(savedDownloadId);
+            }
+          });
+        } else {
+          chrome.downloads.show(savedDownloadId);
+        }
+      });
+    } catch (e) {
       chrome.downloads.show(savedDownloadId);
-      return;
-    } catch (e) {}
+    }
   }
 }
 
@@ -159,7 +177,7 @@ function setSaving(active) {
   if (active) {
     saveBtn.innerHTML = '<span class="spinner"></span><span>保存中...</span>';
   } else {
-    saveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" style="width:18px;height:18px"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><span id="saveBtnText">保存当前网页</span>';
+    saveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" style="width:18px;height:18px"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><span>保存当前网页</span>';
   }
 }
 
@@ -220,8 +238,8 @@ chrome.runtime.onMessage.addListener((message) => {
     const total = pendingData ? pendingData.mediaUrls.length : 0;
     const completed = Math.min(message.current, total);
     setProgress(completed + 1, total + 1);
-    setProgressLabel(`正在下载: ${message.status || `${completed}/${total}`}`);
-    setStatus(`正在下载 ${completed} / ${total}`);
+    setProgressLabel('正在下载: ' + (message.status || (completed + '/' + total)));
+    setStatus('正在下载 ' + completed + ' / ' + total);
   }
   return false;
 });

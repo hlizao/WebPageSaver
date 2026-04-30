@@ -1,12 +1,15 @@
 async function extractPage() {
   try {
     const mediaUrls = extractMediaUrls();
-    const html = await buildOfflineHtml(mediaUrls);
+    const title = document.title || '未命名页面';
+    const mediaDirName = sanitizeMediaDirName(title);
+    const html = await buildOfflineHtml(mediaUrls, mediaDirName);
     return {
       success: true,
       html: html,
       mediaUrls: mediaUrls,
-      title: document.title || '未命名页面'
+      title: title,
+      mediaDirName: mediaDirName
     };
   } catch (err) {
     return {
@@ -14,6 +17,13 @@ async function extractPage() {
       error: err.message || '页面提取失败'
     };
   }
+}
+
+function sanitizeMediaDirName(name) {
+  if (!name) return 'page_media';
+  let safe = name.replace(/[\\/:*?"<>|]/g, '_').trim();
+  if (safe.length > 100) safe = safe.substring(0, 100);
+  return safe + '_media';
 }
 
 function extractMediaUrls() {
@@ -115,7 +125,14 @@ function extractUrlsFromCssText(cssText, urlSet) {
   }
 }
 
-async function buildOfflineHtml(mediaUrls) {
+function fetchTextContent(url) {
+  return fetch(url, { credentials: 'include' }).then(r => {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.text();
+  });
+}
+
+async function buildOfflineHtml(mediaUrls, mediaDirName) {
   const clone = document.documentElement.cloneNode(true);
 
   const urlToFilename = new Map();
@@ -123,31 +140,22 @@ async function buildOfflineHtml(mediaUrls) {
     urlToFilename.set(url, getLocalFilename(url));
   });
 
-  // Identify CSS and JS URLs for inlining
-  const cssUrls = [];
-  const jsUrls = [];
-  mediaUrls.forEach(url => {
-    const path = url.split('?')[0].split('#')[0];
-    const ext = path.split('.').pop().toLowerCase();
-    if (['css', 'less', 'scss', 'sass'].includes(ext)) cssUrls.push(url);
-    if (['js', 'mjs', 'jsx'].includes(ext)) jsUrls.push(url);
-  });
+  const mediaPrefix = './' + mediaDirName + '/';
 
   const walker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
   let node;
   while ((node = walker.nextNode()) !== null) {
-    replaceElementUrls(node, urlToFilename);
+    replaceElementUrls(node, urlToFilename, mediaPrefix);
   }
 
   clone.querySelectorAll('style').forEach(styleTag => {
-    styleTag.textContent = replaceUrlsInText(styleTag.textContent, urlToFilename);
+    styleTag.textContent = replaceUrlsInText(styleTag.textContent, urlToFilename, mediaPrefix);
   });
 
   clone.querySelectorAll('[style]').forEach(el => {
-    el.setAttribute('style', replaceUrlsInText(el.getAttribute('style'), urlToFilename));
+    el.setAttribute('style', replaceUrlsInText(el.getAttribute('style'), urlToFilename, mediaPrefix));
   });
 
-  // Inline CSS: fetch text content and replace <link> with <style>
   for (const link of clone.querySelectorAll('link[rel="stylesheet"]')) {
     const href = link.getAttribute('href');
     const abs = href ? resolveUrl(href) : null;
@@ -156,10 +164,9 @@ async function buildOfflineHtml(mediaUrls) {
         const cssText = await fetchTextContent(abs);
         const styleEl = document.createElement('style');
         styleEl.setAttribute('data-original-href', abs);
-        styleEl.textContent = replaceUrlsInText(cssText, urlToFilename);
+        styleEl.textContent = replaceUrlsInText(cssText, urlToFilename, mediaPrefix);
         link.parentNode.replaceChild(styleEl, link);
       } catch (e) {
-        // Failed to fetch CSS, keep as placeholder
         const styleEl = document.createElement('style');
         styleEl.setAttribute('data-original-href', abs);
         styleEl.textContent = '/* CSS from ' + abs + ' (fetch failed) */';
@@ -168,7 +175,6 @@ async function buildOfflineHtml(mediaUrls) {
     }
   }
 
-  // Inline JS: fetch text content and replace <script src> with inline <script>
   for (const script of clone.querySelectorAll('script[src]')) {
     const src = script.getAttribute('src');
     const abs = src ? resolveUrl(src) : null;
@@ -184,7 +190,6 @@ async function buildOfflineHtml(mediaUrls) {
     }
   }
 
-  // Handle lazy-load attributes: replace with actual src
   clone.querySelectorAll('[data-src], [data-original], [data-lazy-src], [data-lazy]').forEach(el => {
     const tag = el.tagName.toLowerCase();
     const lazyAttrs = ['data-src', 'data-original', 'data-lazy-src', 'data-lazy'];
@@ -196,7 +201,7 @@ async function buildOfflineHtml(mediaUrls) {
         const abs = resolveUrl(val);
         if (urlToFilename.has(abs)) {
           if (setableTags.includes(tag)) {
-            el.setAttribute('src', './media/' + urlToFilename.get(abs));
+            el.setAttribute('src', mediaPrefix + urlToFilename.get(abs));
           }
           el.removeAttribute(attr);
         }
@@ -210,7 +215,7 @@ async function buildOfflineHtml(mediaUrls) {
         const url = pieces[0];
         const abs = resolveUrl(url);
         if (urlToFilename.has(abs)) {
-          pieces[0] = './media/' + urlToFilename.get(abs);
+          pieces[0] = mediaPrefix + urlToFilename.get(abs);
         }
         return pieces.join(' ');
       }).join(', ');
@@ -220,21 +225,21 @@ async function buildOfflineHtml(mediaUrls) {
   });
 
   const doctype = document.doctype
-    ? `<!DOCTYPE ${document.doctype.name}` +
-      (document.doctype.publicId ? ` PUBLIC "${document.doctype.publicId}"` : '') +
-      (document.doctype.systemId ? ` "${document.doctype.systemId}"` : '') +
-      `>\n`
+    ? '<!DOCTYPE ' + document.doctype.name +
+      (document.doctype.publicId ? ' PUBLIC "' + document.doctype.publicId + '"' : '') +
+      (document.doctype.systemId ? ' "' + document.doctype.systemId + '"' : '') +
+      '>\n'
     : '';
 
   return doctype + clone.outerHTML;
 }
 
-function replaceElementUrls(el, urlToFilename) {
+function replaceElementUrls(el, urlToFilename, mediaPrefix) {
   if (el.hasAttribute('src')) {
     const src = el.getAttribute('src');
     const abs = resolveUrl(src);
     if (urlToFilename.has(abs)) {
-      el.setAttribute('src', './media/' + urlToFilename.get(abs));
+      el.setAttribute('src', mediaPrefix + urlToFilename.get(abs));
     }
   }
 
@@ -242,7 +247,7 @@ function replaceElementUrls(el, urlToFilename) {
     const href = el.getAttribute('href');
     const abs = resolveUrl(href);
     if (urlToFilename.has(abs)) {
-      el.setAttribute('href', './media/' + urlToFilename.get(abs));
+      el.setAttribute('href', mediaPrefix + urlToFilename.get(abs));
     }
   }
 
@@ -252,7 +257,7 @@ function replaceElementUrls(el, urlToFilename) {
       const url = pieces[0];
       const abs = resolveUrl(url);
       if (urlToFilename.has(abs)) {
-        pieces[0] = './media/' + urlToFilename.get(abs);
+        pieces[0] = mediaPrefix + urlToFilename.get(abs);
       }
       return pieces.join(' ');
     }).join(', ');
@@ -263,7 +268,7 @@ function replaceElementUrls(el, urlToFilename) {
     const poster = el.getAttribute('poster');
     const abs = resolveUrl(poster);
     if (urlToFilename.has(abs)) {
-      el.setAttribute('poster', './media/' + urlToFilename.get(abs));
+      el.setAttribute('poster', mediaPrefix + urlToFilename.get(abs));
     }
   }
 
@@ -271,22 +276,22 @@ function replaceElementUrls(el, urlToFilename) {
     const data = el.getAttribute('data');
     const abs = resolveUrl(data);
     if (urlToFilename.has(abs)) {
-      el.setAttribute('data', './media/' + urlToFilename.get(abs));
+      el.setAttribute('data', mediaPrefix + urlToFilename.get(abs));
     }
   }
 
   if (el.hasAttribute('style')) {
-    el.setAttribute('style', replaceUrlsInText(el.getAttribute('style'), urlToFilename));
+    el.setAttribute('style', replaceUrlsInText(el.getAttribute('style'), urlToFilename, mediaPrefix));
   }
 }
 
-function replaceUrlsInText(text, urlToFilename) {
+function replaceUrlsInText(text, urlToFilename, mediaPrefix) {
   if (!text) return text;
   let result = text;
   urlToFilename.forEach((filename, url) => {
     const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(escaped, 'g');
-    result = result.replace(regex, './media/' + filename);
+    result = result.replace(regex, mediaPrefix + filename);
   });
   return result;
 }

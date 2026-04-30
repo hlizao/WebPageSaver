@@ -1,4 +1,8 @@
-try { importScripts('shared.js'); } catch (e) {}
+try {
+  importScripts('utils.js');
+} catch (e) {
+  console.error('importScripts failed:', e);
+}
 
 let currentSaveBaseDir = null;
 
@@ -14,7 +18,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'savePage') {
     (async () => {
       try {
-        const result = await savePage(request.html, request.mediaUrls, request.baseDir);
+        const result = await savePage(request.html, request.mediaUrls, request.baseDir, request.mediaDirName);
         sendResponse({ success: true, ...result });
       } catch (err) {
         sendResponse({ success: false, error: err.message || '保存失败' });
@@ -24,14 +28,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-async function savePage(html, mediaUrls, baseDir) {
+async function savePage(html, mediaUrls, baseDir, mediaDirName) {
   currentSaveBaseDir = baseDir;
 
   let downloadedCount = 0;
   const total = mediaUrls.length;
 
   try {
-    await notifyProgress(0, total, `开始下载 ${total} 个资源...`);
+    await notifyProgress(0, total, '开始下载资源...');
 
     const filenameMap = new Map();
 
@@ -39,7 +43,7 @@ async function savePage(html, mediaUrls, baseDir) {
       const url = mediaUrls[i];
 
       try {
-        await notifyProgress(i, total, `正在下载: ${getShortUrl(url)}`);
+        await notifyProgress(i, total, getShortUrl(url));
 
         const blob = await fetchMediaWithRetry(url, 3);
 
@@ -52,23 +56,23 @@ async function savePage(html, mediaUrls, baseDir) {
             const extIndex = filename.lastIndexOf('.');
             const name = extIndex > 0 ? filename.substring(0, extIndex) : filename;
             const ext = extIndex > 0 ? filename.substring(extIndex) : '';
-            uniqueName = `${name}_${counter}${ext}`;
+            uniqueName = name + '_' + counter + ext;
             counter++;
           }
           filenameMap.set(uniqueName, true);
 
-          const filePath = `${baseDir}/media/${uniqueName}`;
-          await saveBlobToFile(blob, filePath, false);
+          const filePath = baseDir + '/' + mediaDirName + '/' + uniqueName;
+          const dlId = await saveBlobToFile(blob, filePath, false);
           downloadedCount++;
         }
       } catch (err) {
-        console.warn(`跳过资源: ${url}`, err);
+        console.warn('跳过资源:', url, err);
       }
 
-      await delay(50);
+      await new Promise(r => setTimeout(r, 50));
     }
 
-    await notifyProgress(total, total, '资源下载完成！');
+    await notifyProgress(total, total, '资源下载完成');
 
     return { downloadedCount };
   } finally {
@@ -79,17 +83,12 @@ async function savePage(html, mediaUrls, baseDir) {
 async function fetchMediaWithRetry(url, maxRetries) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const response = await fetch(url, {
-        method: 'GET',
-        credentials: 'include'
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const response = await fetch(url, { method: 'GET', credentials: 'include' });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
       return await response.blob();
     } catch (err) {
       if (attempt < maxRetries) {
-        const backoff = attempt * 1000;
-        console.warn(`下载失败 (${attempt}/${maxRetries}): ${url}, ${backoff}ms 后重试`, err);
-        await delay(backoff);
+        await new Promise(r => setTimeout(r, attempt * 1000));
       } else {
         throw err;
       }
@@ -98,18 +97,16 @@ async function fetchMediaWithRetry(url, maxRetries) {
   return null;
 }
 
-function saveBlobToFile(blob, filename, saveAs = false) {
+function saveBlobToFile(blob, filename, saveAs) {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error('保存文件超时'));
-    }, 60000);
-
+    const timeout = setTimeout(() => reject(new Error('Timeout')), 60000);
     try {
       const url = URL.createObjectURL(blob);
       chrome.downloads.download({
         url: url,
         filename: filename,
-        saveAs: saveAs
+        saveAs: !!saveAs,
+        conflictAction: 'uniquify'
       }, (downloadId) => {
         URL.revokeObjectURL(url);
         clearTimeout(timeout);
@@ -132,8 +129,7 @@ async function notifyProgress(current, total, status) {
       action: 'downloadProgress',
       current: current,
       total: total,
-      status: status
+      status: status || ''
     });
-  } catch (e) {
-  }
+  } catch (e) {}
 }

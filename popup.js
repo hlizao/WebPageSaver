@@ -26,6 +26,22 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+function downloadFile(filename, blob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    chrome.downloads.download({
+      url: url,
+      filename: filename,
+      saveAs: false,
+      conflictAction: 'uniquify'
+    }, (id) => {
+      URL.revokeObjectURL(url);
+      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+      else resolve(id);
+    });
+  });
+}
+
 async function handleSaveClick() {
   resetUI();
   setSaving(true);
@@ -53,7 +69,6 @@ async function handleSaveClick() {
       throw new Error(response?.error || '页面提取失败');
     }
 
-    // Show stats
     const total = response.mediaUrls.length;
     const imgCount = response.mediaUrls.filter(u => {
       const ext = u.split('?')[0].split('.').pop().toLowerCase();
@@ -67,60 +82,88 @@ async function handleSaveClick() {
     const mediaDirName = pageName + '_media';
     const htmlFileName = ROOT_DIR + '/' + pageName + '.html';
 
-    pendingData = {
-      html: response.html,
-      mediaUrls: response.mediaUrls,
-      baseDir: ROOT_DIR,
-      mediaDirName: mediaDirName
-    };
+    pendingData = { mediaUrls: response.mediaUrls, mediaDirName: mediaDirName };
 
     showProgress(true);
     setProgress(0, total + 1);
     setProgressLabel('正在保存 HTML 文件...');
 
     const htmlBlob = new Blob([response.html], { type: 'text/html;charset=utf-8' });
-    const dataUrl = await blobToDataUrl(htmlBlob);
-
-    const htmlDownloadId = await new Promise((resolve, reject) => {
-      chrome.downloads.download({
-        url: dataUrl,
-        filename: htmlFileName,
-        saveAs: false
-      }, (id) => {
-        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-        else resolve(id);
-      });
-    });
-
+    const htmlDownloadId = await downloadFile(htmlFileName, htmlBlob);
     savedDownloadId = htmlDownloadId;
 
     setProgress(1, total + 1);
+    if (total === 0) {
+      setProgressLabel('保存完成');
+      showResult('success', '保存成功！HTML 文件已下载（页面无媒体资源）');
+      openFolderBtn.classList.remove('hidden');
+      newSaveBtn.classList.remove('hidden');
+      return;
+    }
+
     setProgressLabel('已保存 HTML，开始下载 ' + total + ' 个媒体资源...');
     setStatus('正在下载 0 / ' + total);
 
-    const saveResult = await chrome.runtime.sendMessage({
-      action: 'savePage',
-      html: response.html,
-      mediaUrls: response.mediaUrls,
-      baseDir: ROOT_DIR,
-      mediaDirName: mediaDirName
-    });
+    let downloadedCount = 0;
+    const filenameMap = new Map();
 
-    if (saveResult && saveResult.success) {
-      setProgress(total + 1, total + 1);
-      setProgressLabel('保存完成');
-      showResult('success', '保存成功！HTML 文件 + ' + saveResult.downloadedCount + ' 个资源已下载');
-      openFolderBtn.classList.remove('hidden');
-      newSaveBtn.classList.remove('hidden');
-    } else {
-      throw new Error(saveResult?.error || '保存失败');
+    for (let i = 0; i < total; i++) {
+      const url = response.mediaUrls[i];
+      try {
+        setProgressLabel('下载 (' + (i + 1) + '/' + total + '): ' + getShortUrl(url));
+        setStatus('正在下载 ' + (i + 1) + ' / ' + total);
+
+        const blob = await fetchMedia(url);
+        if (blob) {
+          let filename = getLocalFilename(url);
+          let uniqueName = filename;
+          let counter = 1;
+          while (filenameMap.has(uniqueName)) {
+            const extIndex = filename.lastIndexOf('.');
+            const name = extIndex > 0 ? filename.substring(0, extIndex) : filename;
+            const ext = extIndex > 0 ? filename.substring(extIndex) : '';
+            uniqueName = name + '_' + counter + ext;
+            counter++;
+          }
+          filenameMap.set(uniqueName, true);
+
+          const filePath = ROOT_DIR + '/' + mediaDirName + '/' + uniqueName;
+          await downloadFile(filePath, blob);
+          downloadedCount++;
+        }
+      } catch (err) {
+        console.warn('跳过:', url, err);
+      }
+
+      setProgress(i + 2, total + 1);
     }
+
+    setProgress(total + 1, total + 1);
+    setProgressLabel('保存完成');
+    showResult('success', '保存成功！HTML 文件 + ' + downloadedCount + ' 个资源已下载');
+    openFolderBtn.classList.remove('hidden');
+    newSaveBtn.classList.remove('hidden');
+
   } catch (err) {
     showResult('error', err.message || '保存过程中发生错误');
   } finally {
     setSaving(false);
     pendingData = null;
   }
+}
+
+async function fetchMedia(url) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await fetch(url, { method: 'GET', credentials: 'include' });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      return await response.blob();
+    } catch (err) {
+      if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 1000));
+      else throw err;
+    }
+  }
+  return null;
 }
 
 async function handleOpenFolder() {
@@ -149,15 +192,6 @@ async function handleOpenFolder() {
   }
 }
 
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-}
-
 function resetUI() {
   progressFill.style.width = '0%';
   progressPct.textContent = '0%';
@@ -174,20 +208,13 @@ function resetUI() {
 
 function setSaving(active) {
   saveBtn.disabled = active;
-  if (active) {
-    saveBtn.innerHTML = '<span class="spinner"></span><span>保存中...</span>';
-  } else {
-    saveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" style="width:18px;height:18px"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><span>保存当前网页</span>';
-  }
+  saveBtn.innerHTML = active
+    ? '<span class="spinner"></span><span>保存中...</span>'
+    : '<svg viewBox="0 0 24 24" fill="currentColor" style="width:18px;height:18px"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><span>保存当前网页</span>';
 }
 
-function setStatus(text) {
-  statusText.textContent = text;
-}
-
-function showProgress(show) {
-  progressArea.classList.toggle('active', show);
-}
+function setStatus(text) { statusText.textContent = text; }
+function showProgress(show) { progressArea.classList.toggle('active', show); }
 
 function setProgress(current, total) {
   const pct = total > 0 ? Math.round((current / total) * 100) : 0;
@@ -195,9 +222,7 @@ function setProgress(current, total) {
   progressPct.textContent = pct + '%';
 }
 
-function setProgressLabel(text) {
-  progressLabel.textContent = text;
-}
+function setProgressLabel(text) { progressLabel.textContent = text; }
 
 function showResult(type, msg) {
   resultBanner.className = 'result-banner visible ' + type;
@@ -219,27 +244,10 @@ async function injectAndExtract(tabId) {
     target: { tabId: tabId },
     files: ['shared.js', 'page-extractor.js']
   });
-
   const results = await chrome.scripting.executeScript({
     target: { tabId: tabId },
-    func: async () => {
-      return await extractPage();
-    }
+    func: async () => await extractPage()
   });
-
-  if (results && results[0] && results[0].result) {
-    return results[0].result;
-  }
+  if (results && results[0] && results[0].result) return results[0].result;
   throw new Error('页面提取失败：注入后仍无法执行提取');
 }
-
-chrome.runtime.onMessage.addListener((message) => {
-  if (message.action === 'downloadProgress') {
-    const total = pendingData ? pendingData.mediaUrls.length : 0;
-    const completed = Math.min(message.current, total);
-    setProgress(completed + 1, total + 1);
-    setProgressLabel('正在下载: ' + (message.status || (completed + '/' + total)));
-    setStatus('正在下载 ' + completed + ' / ' + total);
-  }
-  return false;
-});

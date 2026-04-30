@@ -1,3 +1,5 @@
+try { importScripts('shared.js'); } catch (e) {}
+
 let currentSaveBaseDir = null;
 
 chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
@@ -44,7 +46,6 @@ async function savePage(html, mediaUrls, baseDir) {
         if (blob) {
           let filename = getLocalFilename(url);
 
-          // deduplicate
           let uniqueName = filename;
           let counter = 1;
           while (filenameMap.has(uniqueName)) {
@@ -101,34 +102,27 @@ function saveBlobToFile(blob, filename, saveAs = false) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error('保存文件超时'));
-    }, 30000);
+    }, 60000);
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      try {
-        const dataUrl = reader.result;
-        chrome.downloads.download({
-          url: dataUrl,
-          filename: filename,
-          saveAs: saveAs
-        }, (downloadId) => {
-          clearTimeout(timeout);
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else {
-            resolve(downloadId);
-          }
-        });
-      } catch (err) {
+    try {
+      const url = URL.createObjectURL(blob);
+      chrome.downloads.download({
+        url: url,
+        filename: filename,
+        saveAs: saveAs
+      }, (downloadId) => {
+        URL.revokeObjectURL(url);
         clearTimeout(timeout);
-        reject(err);
-      }
-    };
-    reader.onerror = () => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve(downloadId);
+        }
+      });
+    } catch (err) {
       clearTimeout(timeout);
-      reject(reader.error);
-    };
-    reader.readAsDataURL(blob);
+      reject(err);
+    }
   });
 }
 
@@ -141,6 +135,5 @@ async function notifyProgress(current, total, status) {
       status: status
     });
   } catch (e) {
-    // popup may be closed
   }
 }

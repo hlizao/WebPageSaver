@@ -1,7 +1,7 @@
-function extractPage() {
+async function extractPage() {
   try {
     const mediaUrls = extractMediaUrls();
-    const html = buildOfflineHtml(mediaUrls);
+    const html = await buildOfflineHtml(mediaUrls);
     return {
       success: true,
       html: html,
@@ -31,57 +31,47 @@ function extractMediaUrls() {
     });
   };
 
-  // 1. img src + srcset
   document.querySelectorAll('img').forEach(img => {
     tryAdd(img.src);
     processSrcset(img.srcset);
   });
 
-  // 2. video src + poster
   document.querySelectorAll('video').forEach(video => {
     tryAdd(video.src);
     if (video.poster) tryAdd(video.poster);
   });
 
-  // 3. audio src
   document.querySelectorAll('audio').forEach(audio => {
     tryAdd(audio.src);
   });
 
-  // 4. source src + srcset
   document.querySelectorAll('source').forEach(source => {
     tryAdd(source.src);
     processSrcset(source.srcset);
   });
 
-  // 5. link[rel="stylesheet"] href
   document.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
     if (link.href) tryAdd(link.href);
   });
 
-  // 6. script src
   document.querySelectorAll('script[src]').forEach(script => {
     if (script.src) tryAdd(script.src);
   });
 
-  // 7. iframe, embed, object
   document.querySelectorAll('iframe[src], embed[src], object[data]').forEach(el => {
     if (el.src) tryAdd(el.src);
     if (el.getAttribute('data')) tryAdd(resolveUrl(el.getAttribute('data')));
   });
 
-  // 8. CSS background-image from all elements
   document.querySelectorAll('*').forEach(el => {
     const style = window.getComputedStyle(el);
     extractUrlsFromCssValue(style.backgroundImage || el.style.backgroundImage, urls);
   });
 
-  // 9. <style> tag content
   document.querySelectorAll('style').forEach(styleTag => {
     extractUrlsFromCssText(styleTag.textContent, urls);
   });
 
-  // 10. external stylesheets via document.styleSheets
   try {
     Array.from(document.styleSheets).forEach(sheet => {
       try {
@@ -92,14 +82,12 @@ function extractMediaUrls() {
     });
   } catch (e) {}
 
-  // 11. lazy-load attributes (data-src, data-original, data-lazy-src, data-lazy)
   document.querySelectorAll('[data-src], [data-original], [data-lazy-src], [data-lazy]').forEach(el => {
     const lazyAttrs = ['data-src', 'data-original', 'data-lazy-src', 'data-lazy'];
     lazyAttrs.forEach(attr => {
       const val = el.getAttribute(attr);
       if (val && !val.startsWith('data:')) tryAdd(resolveUrl(val));
     });
-    // data-srcset
     const dataSrcset = el.getAttribute('data-srcset');
     processSrcset(dataSrcset);
   });
@@ -127,14 +115,7 @@ function extractUrlsFromCssText(cssText, urlSet) {
   }
 }
 
-function fetchTextContent(url) {
-  return fetch(url, { credentials: 'include' }).then(r => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.text();
-  });
-}
-
-function buildOfflineHtml(mediaUrls) {
+async function buildOfflineHtml(mediaUrls) {
   const clone = document.documentElement.cloneNode(true);
 
   const urlToFilename = new Map();
@@ -142,15 +123,14 @@ function buildOfflineHtml(mediaUrls) {
     urlToFilename.set(url, getLocalFilename(url));
   });
 
-  // Collect CSS and JS URLs for inline processing
+  // Identify CSS and JS URLs for inlining
   const cssUrls = [];
   const jsUrls = [];
   mediaUrls.forEach(url => {
-    const ext = url.split('?')[0].split('.').pop().toLowerCase();
-    const cssExts = ['css', 'less', 'scss', 'sass'];
-    const jsExts = ['js', 'mjs', 'jsx'];
-    if (cssExts.includes(ext)) cssUrls.push(url);
-    if (jsExts.includes(ext)) jsUrls.push(url);
+    const path = url.split('?')[0].split('#')[0];
+    const ext = path.split('.').pop().toLowerCase();
+    if (['css', 'less', 'scss', 'sass'].includes(ext)) cssUrls.push(url);
+    if (['js', 'mjs', 'jsx'].includes(ext)) jsUrls.push(url);
   });
 
   const walker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
@@ -159,56 +139,84 @@ function buildOfflineHtml(mediaUrls) {
     replaceElementUrls(node, urlToFilename);
   }
 
-  // Replace <style> tag content
   clone.querySelectorAll('style').forEach(styleTag => {
     styleTag.textContent = replaceUrlsInText(styleTag.textContent, urlToFilename);
   });
 
-  // Replace inline style attributes
   clone.querySelectorAll('[style]').forEach(el => {
     el.setAttribute('style', replaceUrlsInText(el.getAttribute('style'), urlToFilename));
   });
 
-  // Inline CSS: replace <link rel="stylesheet"> with <style>
-  clone.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
+  // Inline CSS: fetch text content and replace <link> with <style>
+  for (const link of clone.querySelectorAll('link[rel="stylesheet"]')) {
     const href = link.getAttribute('href');
-    if (!href) return;
-    const style = document.createElement('style');
-    style.setAttribute('data-original-href', href);
-    style.textContent = '/* CSS from ' + href + ' */';
-    link.parentNode.replaceChild(style, link);
-  });
+    const abs = href ? resolveUrl(href) : null;
+    if (abs && urlToFilename.has(abs)) {
+      try {
+        const cssText = await fetchTextContent(abs);
+        const styleEl = document.createElement('style');
+        styleEl.setAttribute('data-original-href', abs);
+        styleEl.textContent = replaceUrlsInText(cssText, urlToFilename);
+        link.parentNode.replaceChild(styleEl, link);
+      } catch (e) {
+        // Failed to fetch CSS, keep as placeholder
+        const styleEl = document.createElement('style');
+        styleEl.setAttribute('data-original-href', abs);
+        styleEl.textContent = '/* CSS from ' + abs + ' (fetch failed) */';
+        link.parentNode.replaceChild(styleEl, link);
+      }
+    }
+  }
 
-  // Inline JS: replace <script src> with inline <script>
-  clone.querySelectorAll('script[src]').forEach(script => {
+  // Inline JS: fetch text content and replace <script src> with inline <script>
+  for (const script of clone.querySelectorAll('script[src]')) {
     const src = script.getAttribute('src');
     const abs = src ? resolveUrl(src) : null;
     if (abs && urlToFilename.has(abs)) {
-      script.removeAttribute('src');
-      script.textContent = '/* JS from ' + abs + ' */';
-    } else if (src) {
-      // If we can't resolve or find it, still try to inline as empty
-      script.removeAttribute('src');
-      script.textContent = '/* Original JS src: ' + src + ' */';
+      try {
+        const jsText = await fetchTextContent(abs);
+        script.removeAttribute('src');
+        script.textContent = jsText;
+      } catch (e) {
+        script.removeAttribute('src');
+        script.textContent = '/* JS from ' + abs + ' (fetch failed) */';
+      }
     }
-  });
+  }
 
-  // Set lazy-load attributes to empty so they don't trigger re-fetch
+  // Handle lazy-load attributes: replace with actual src
   clone.querySelectorAll('[data-src], [data-original], [data-lazy-src], [data-lazy]').forEach(el => {
     const tag = el.tagName.toLowerCase();
     const lazyAttrs = ['data-src', 'data-original', 'data-lazy-src', 'data-lazy'];
-    let srcAttr = null;
+    const setableTags = ['img', 'video', 'audio', 'source', 'iframe', 'embed'];
+
     lazyAttrs.forEach(attr => {
       const val = el.getAttribute(attr);
       if (val) {
         const abs = resolveUrl(val);
         if (urlToFilename.has(abs)) {
-          el.setAttribute('./media/' + urlToFilename.get(abs));
+          if (setableTags.includes(tag)) {
+            el.setAttribute('src', './media/' + urlToFilename.get(abs));
+          }
           el.removeAttribute(attr);
-          srcAttr = true;
         }
       }
     });
+
+    const dataSrcset = el.getAttribute('data-srcset');
+    if (dataSrcset) {
+      const newSrcset = dataSrcset.split(',').map(part => {
+        const pieces = part.trim().split(/\s+/);
+        const url = pieces[0];
+        const abs = resolveUrl(url);
+        if (urlToFilename.has(abs)) {
+          pieces[0] = './media/' + urlToFilename.get(abs);
+        }
+        return pieces.join(' ');
+      }).join(', ');
+      el.setAttribute('srcset', newSrcset);
+      el.removeAttribute('data-srcset');
+    }
   });
 
   const doctype = document.doctype
@@ -222,7 +230,6 @@ function buildOfflineHtml(mediaUrls) {
 }
 
 function replaceElementUrls(el, urlToFilename) {
-  // src attribute
   if (el.hasAttribute('src')) {
     const src = el.getAttribute('src');
     const abs = resolveUrl(src);
@@ -231,7 +238,6 @@ function replaceElementUrls(el, urlToFilename) {
     }
   }
 
-  // href attribute
   if (el.hasAttribute('href')) {
     const href = el.getAttribute('href');
     const abs = resolveUrl(href);
@@ -240,7 +246,6 @@ function replaceElementUrls(el, urlToFilename) {
     }
   }
 
-  // srcset attribute
   if (el.hasAttribute('srcset')) {
     const newSrcset = el.getAttribute('srcset').split(',').map(part => {
       const pieces = part.trim().split(/\s+/);
@@ -254,7 +259,6 @@ function replaceElementUrls(el, urlToFilename) {
     el.setAttribute('srcset', newSrcset);
   }
 
-  // poster attribute
   if (el.hasAttribute('poster')) {
     const poster = el.getAttribute('poster');
     const abs = resolveUrl(poster);
@@ -263,7 +267,6 @@ function replaceElementUrls(el, urlToFilename) {
     }
   }
 
-  // data attribute (for object)
   if (el.hasAttribute('data')) {
     const data = el.getAttribute('data');
     const abs = resolveUrl(data);
@@ -272,7 +275,6 @@ function replaceElementUrls(el, urlToFilename) {
     }
   }
 
-  // inline style
   if (el.hasAttribute('style')) {
     el.setAttribute('style', replaceUrlsInText(el.getAttribute('style'), urlToFilename));
   }

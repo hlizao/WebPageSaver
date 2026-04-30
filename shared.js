@@ -44,7 +44,7 @@ function hashCode(str) {
 
 function resolveUrl(url, base) {
   try {
-    return new URL(url, base || window.location.href).href;
+    return new URL(url, base || (typeof window !== 'undefined' ? window.location.href : undefined)).href;
   } catch (e) {
     return url;
   }

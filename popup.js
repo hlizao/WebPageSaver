@@ -1,45 +1,44 @@
-const saveBtn = document.getElementById('saveBtn');
-const openFolderBtn = document.getElementById('openFolderBtn');
-const newSaveBtn = document.getElementById('newSaveBtn');
-const progressArea = document.getElementById('progressArea');
-const progressFill = document.getElementById('progressFill');
-const progressLabel = document.getElementById('progressLabel');
-const progressPct = document.getElementById('progressPct');
-const statusText = document.getElementById('statusText');
-const resultBanner = document.getElementById('resultBanner');
-const resultText = document.getElementById('resultText');
-const resultIcon = document.getElementById('resultIcon');
-const statMedia = document.getElementById('statMedia');
-const statImages = document.getElementById('statImages');
-const statOthers = document.getElementById('statOthers');
+var saveBtn = document.getElementById('saveBtn');
+var openFolderBtn = document.getElementById('openFolderBtn');
+var newSaveBtn = document.getElementById('newSaveBtn');
+var progressArea = document.getElementById('progressArea');
+var progressFill = document.getElementById('progressFill');
+var progressLabel = document.getElementById('progressLabel');
+var progressPct = document.getElementById('progressPct');
+var statusText = document.getElementById('statusText');
+var resultBanner = document.getElementById('resultBanner');
+var resultText = document.getElementById('resultText');
+var resultIcon = document.getElementById('resultIcon');
+var statMedia = document.getElementById('statMedia');
+var statImages = document.getElementById('statImages');
+var statOthers = document.getElementById('statOthers');
 
-const ROOT_DIR = 'WebPageSaver';
-let pendingData = null;
-let savedDownloadId = null;
+var ROOT_DIR = 'WebPageSaver';
+var pendingData = null;
+var savedDownloadId = null;
+var keepAlivePort = null;
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', function() {
   saveBtn.addEventListener('click', handleSaveClick);
   openFolderBtn.addEventListener('click', handleOpenFolder);
-  newSaveBtn.addEventListener('click', () => {
+  newSaveBtn.addEventListener('click', function() {
     resetUI();
     handleSaveClick();
   });
 });
 
-function downloadFile(filename, blob) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(blob);
-    chrome.downloads.download({
-      url: url,
-      filename: filename,
-      saveAs: false,
-      conflictAction: 'uniquify'
-    }, (id) => {
-      URL.revokeObjectURL(url);
-      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-      else resolve(id);
-    });
-  });
+function startKeepAlive() {
+  try {
+    keepAlivePort = chrome.runtime.connect({ name: 'keepAlive' });
+    keepAlivePort.onDisconnect.addListener(function() { keepAlivePort = null; });
+  } catch (e) {}
+}
+
+function stopKeepAlive() {
+  if (keepAlivePort) {
+    try { keepAlivePort.disconnect(); } catch (e) {}
+    keepAlivePort = null;
+  }
 }
 
 async function handleSaveClick() {
@@ -48,51 +47,60 @@ async function handleSaveClick() {
   setStatus('正在提取页面内容...');
 
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    var tab = (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
     if (!tab) throw new Error('无法获取当前标签页');
 
-    const special = checkSpecialPage(tab.url);
-    if (special.isSpecial) throw new Error(special.reason);
+    var sp = checkSpecialPage(tab.url);
+    if (sp.isSpecial) throw new Error(sp.reason);
 
-    let response;
+    var response;
     try {
       response = await chrome.tabs.sendMessage(tab.id, { action: 'extractPage' });
     } catch (err) {
-      if (err.message && err.message.includes('Receiving end does not exist')) {
+      if (err.message && err.message.indexOf('Receiving end does not exist') >= 0) {
         response = await injectAndExtract(tab.id);
       } else {
         throw err;
       }
     }
 
-    if (!response || !response.success) {
-      throw new Error(response?.error || '页面提取失败');
-    }
+    if (!response || !response.success) throw new Error(response ? response.error : '页面提取失败');
 
-    const total = response.mediaUrls.length;
-    const imgCount = response.mediaUrls.filter(u => {
-      const ext = u.split('?')[0].split('.').pop().toLowerCase();
-      return ['jpg','jpeg','png','gif','webp','svg','bmp','ico','avif'].includes(ext);
+    var total = response.mediaUrls.length;
+    var imgCount = response.mediaUrls.filter(function(u) {
+      var ext = u.split('?')[0].split('.').pop().toLowerCase();
+      return ['jpg','jpeg','png','gif','webp','svg','bmp','ico','avif'].indexOf(ext) >= 0;
     }).length;
     statMedia.textContent = total;
     statImages.textContent = imgCount;
     statOthers.textContent = total - imgCount;
 
-    const pageName = sanitizeFileName(response.title || tab.title || '未命名页面');
-    const mediaDirName = pageName + '_media';
-    const htmlFileName = ROOT_DIR + '/' + pageName + '.html';
-
-    pendingData = { mediaUrls: response.mediaUrls, mediaDirName: mediaDirName };
+    var pageName = sanitizeFileName(response.title || tab.title || '未命名页面');
+    var mediaDirName = pageName + '_media';
+    var htmlFileName = ROOT_DIR + '/' + pageName + '.html';
 
     showProgress(true);
     setProgress(0, total + 1);
     setProgressLabel('正在保存 HTML 文件...');
 
-    const htmlBlob = new Blob([response.html], { type: 'text/html;charset=utf-8' });
-    const htmlDownloadId = await downloadFile(htmlFileName, htmlBlob);
-    savedDownloadId = htmlDownloadId;
+    var htmlBlob = new Blob([response.html], { type: 'text/html;charset=utf-8' });
+    var htmlUrl = URL.createObjectURL(htmlBlob);
+    var htmlId = await new Promise(function(resolve, reject) {
+      chrome.downloads.download({
+        url: htmlUrl,
+        filename: htmlFileName,
+        saveAs: false,
+        conflictAction: 'uniquify'
+      }, function(id) {
+        URL.revokeObjectURL(htmlUrl);
+        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+        else resolve(id);
+      });
+    });
+    savedDownloadId = htmlId;
 
     setProgress(1, total + 1);
+
     if (total === 0) {
       setProgressLabel('保存完成');
       showResult('success', '保存成功！HTML 文件已下载（页面无媒体资源）');
@@ -104,39 +112,48 @@ async function handleSaveClick() {
     setProgressLabel('已保存 HTML，开始下载 ' + total + ' 个媒体资源...');
     setStatus('正在下载 0 / ' + total);
 
-    let downloadedCount = 0;
-    const filenameMap = new Map();
+    startKeepAlive();
+    await chrome.runtime.sendMessage({ action: 'startBatch', baseDir: ROOT_DIR });
 
-    for (let i = 0; i < total; i++) {
-      const url = response.mediaUrls[i];
+    var downloadedCount = 0;
+    var filenameMap = new Map();
+
+    for (var i = 0; i < total; i++) {
+      var url = response.mediaUrls[i];
       try {
         setProgressLabel('下载 (' + (i + 1) + '/' + total + '): ' + getShortUrl(url));
         setStatus('正在下载 ' + (i + 1) + ' / ' + total);
 
-        const blob = await fetchMedia(url);
-        if (blob) {
-          let filename = getLocalFilename(url);
-          let uniqueName = filename;
-          let counter = 1;
-          while (filenameMap.has(uniqueName)) {
-            const extIndex = filename.lastIndexOf('.');
-            const name = extIndex > 0 ? filename.substring(0, extIndex) : filename;
-            const ext = extIndex > 0 ? filename.substring(extIndex) : '';
-            uniqueName = name + '_' + counter + ext;
-            counter++;
-          }
-          filenameMap.set(uniqueName, true);
-
-          const filePath = ROOT_DIR + '/' + mediaDirName + '/' + uniqueName;
-          await downloadFile(filePath, blob);
-          downloadedCount++;
+        var filename = getLocalFilename(url);
+        var uniqueName = filename;
+        var counter = 1;
+        while (filenameMap.has(uniqueName)) {
+          var extIdx = filename.lastIndexOf('.');
+          var name = extIdx > 0 ? filename.substring(0, extIdx) : filename;
+          var ext = extIdx > 0 ? filename.substring(extIdx) : '';
+          uniqueName = name + '_' + counter + ext;
+          counter++;
         }
+        filenameMap.set(uniqueName, true);
+
+        var filePath = ROOT_DIR + '/' + mediaDirName + '/' + uniqueName;
+
+        var result = await chrome.runtime.sendMessage({
+          action: 'saveFile',
+          url: url,
+          filePath: filePath
+        });
+
+        if (result && result.success) downloadedCount++;
       } catch (err) {
         console.warn('跳过:', url, err);
       }
 
       setProgress(i + 2, total + 1);
     }
+
+    await chrome.runtime.sendMessage({ action: 'endBatch' });
+    stopKeepAlive();
 
     setProgress(total + 1, total + 1);
     setProgressLabel('保存完成');
@@ -146,36 +163,24 @@ async function handleSaveClick() {
 
   } catch (err) {
     showResult('error', err.message || '保存过程中发生错误');
+    try { await chrome.runtime.sendMessage({ action: 'endBatch' }); } catch (e) {}
+    stopKeepAlive();
   } finally {
     setSaving(false);
     pendingData = null;
   }
 }
 
-async function fetchMedia(url) {
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const response = await fetch(url, { method: 'GET', credentials: 'include' });
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      return await response.blob();
-    } catch (err) {
-      if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 1000));
-      else throw err;
-    }
-  }
-  return null;
-}
-
 async function handleOpenFolder() {
   if (savedDownloadId) {
     try {
-      chrome.downloads.search({ id: savedDownloadId }, (items) => {
+      chrome.downloads.search({ id: savedDownloadId }, function(items) {
         if (items && items.length > 0) {
-          const htmlPath = items[0].filename;
-          const dir = htmlPath.substring(0, htmlPath.lastIndexOf('/'));
+          var htmlPath = items[0].filename;
+          var dir = htmlPath.substring(0, htmlPath.lastIndexOf('/'));
           chrome.downloads.search({
             filenameRegex: '^' + dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '.*'
-          }, (mediaItems) => {
+          }, function(mediaItems) {
             if (mediaItems && mediaItems.length > 0) {
               chrome.downloads.show(mediaItems[mediaItems.length - 1].id);
             } else {
@@ -208,21 +213,23 @@ function resetUI() {
 
 function setSaving(active) {
   saveBtn.disabled = active;
-  saveBtn.innerHTML = active
-    ? '<span class="spinner"></span><span>保存中...</span>'
-    : '<svg viewBox="0 0 24 24" fill="currentColor" style="width:18px;height:18px"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><span>保存当前网页</span>';
+  if (active) {
+    saveBtn.innerHTML = '<span class="spinner"></span><span>保存中...</span>';
+  } else {
+    saveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" style="width:18px;height:18px"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><span>保存当前网页</span>';
+  }
 }
 
-function setStatus(text) { statusText.textContent = text; }
-function showProgress(show) { progressArea.classList.toggle('active', show); }
+function setStatus(t) { statusText.textContent = t; }
+function showProgress(v) { progressArea.classList.toggle('active', v); }
 
-function setProgress(current, total) {
-  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+function setProgress(cur, total) {
+  var pct = total > 0 ? Math.round((cur / total) * 100) : 0;
   progressFill.style.width = pct + '%';
   progressPct.textContent = pct + '%';
 }
 
-function setProgressLabel(text) { progressLabel.textContent = text; }
+function setProgressLabel(t) { progressLabel.textContent = t; }
 
 function showResult(type, msg) {
   resultBanner.className = 'result-banner visible ' + type;
@@ -244,9 +251,9 @@ async function injectAndExtract(tabId) {
     target: { tabId: tabId },
     files: ['shared.js', 'page-extractor.js']
   });
-  const results = await chrome.scripting.executeScript({
+  var results = await chrome.scripting.executeScript({
     target: { tabId: tabId },
-    func: async () => await extractPage()
+    func: async function() { return await extractPage(); }
   });
   if (results && results[0] && results[0].result) return results[0].result;
   throw new Error('页面提取失败：注入后仍无法执行提取');

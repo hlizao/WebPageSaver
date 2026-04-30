@@ -1,12 +1,9 @@
-/**
- * utils.js - 共享工具函数模块 (v2.0.0)
- */
+const WINDOWS_RESERVED=new Set(['CON','PRN','AUX','NUL','COM1','COM2','COM3','COM4','COM5','COM6','COM7','COM8','COM9','LPT1','LPT2','LPT3','LPT4','LPT5','LPT6','LPT7','LPT8','LPT9']);
 function getMediaCategory(f){const e=f.split('.').pop().toLowerCase();const m={pictures:['jpg','jpeg','png','gif','webp','svg','bmp','ico','avif','tiff'],videos:['mp4','webm','ogv','mov','mkv','avi','flv','m4v','3gp'],audios:['mp3','wav','ogg','m4a','flac','aac','wma','opus'],styles:['css','less','scss','sass'],scripts:['js','mjs','jsx','ts','tsx']};for(const[c,x]of Object.entries(m))if(x.includes(e))return c;return'others'}
 function getLocalFilename(u){try{let f=new URL(u).pathname.split('/').pop().split('?')[0].split('#')[0]||'resource';f=f.replace(/[\\/:*?"<>|]/g,'_');if(f.length>200){const e=f.lastIndexOf('.')>0?f.substring(f.lastIndexOf('.')):'';f=f.substring(0,200-e.length)+e}return getMediaCategory(f)+'/'+f}catch(e){return'others/resource_'+Math.abs(hashCode(u))+'.bin'}}
 function hashCode(s){let h=0;for(let i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0}return h}
 function resolveUrl(u,b){try{return new URL(u,b).href}catch(e){return u}}
 function getShortUrl(u){try{const x=new URL(u);let p=x.pathname;if(p.length>30)p='...'+p.substring(p.length-27);return x.hostname+p}catch(e){return u.substring(0,40)}}
-function sanitizeFileName(n){if(!n)return'未命名页面';let s=n.replace(/[\\/:*?"<>|]/g,'_').trim();if(s.length>100)s=s.substring(0,100);return s||'未命名页面'}
+function sanitizeFileName(n){if(!n)return'unnamed_page';let s=n.replace(/[\\/:*?"<>|]/g,'_').trim();s=s.replace(/^\.+/,'').replace(/\.+$/,'');if(s.length>100)s=s.substring(0,100);s=s.replace(/ +$/,'').replace(/\.+$/,'');s=WINDOWS_RESERVED.has(s.toUpperCase())?s+'_':s;return s||'unnamed_page'}
 function delay(m){return new Promise(r=>setTimeout(r,m))}
 function checkSpecialPage(u){if(!u)return{isSpecial:true,reason:'无法获取 URL'};try{const x=new URL(u),p=x.protocol;if(['chrome:','chrome-extension:'].includes(p))return{isSpecial:true,reason:'无法保存 Chrome 内部页面'};if(['edge:','edge-extension:'].includes(p))return{isSpecial:true,reason:'无法保存 Edge 内部页面'};if(p==='about:')return{isSpecial:true,reason:'无法保存 about 页面'};if(p==='file:')return{isSpecial:true,reason:'不支持本地文件'};if(x.href==='about:blank'||u.includes('newtab'))return{isSpecial:true,reason:'新标签页无内容'};return{isSpecial:false,reason:null}}catch(e){return{isSpecial:true,reason:'URL 格式异常'}}}
-if(typeof module!=='undefined'&&module.exports)module.exports={getMediaCategory,getLocalFilename,hashCode,resolveUrl,getShortUrl,sanitizeFileName,delay,checkSpecialPage}

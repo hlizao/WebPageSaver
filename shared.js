@@ -6,6 +6,12 @@ const MEDIA_CATEGORIES = {
   scripts: ['js', 'mjs', 'jsx', 'ts', 'tsx']
 };
 
+const WINDOWS_RESERVED = new Set([
+  'CON','PRN','AUX','NUL',
+  'COM1','COM2','COM3','COM4','COM5','COM6','COM7','COM8','COM9',
+  'LPT1','LPT2','LPT3','LPT4','LPT5','LPT6','LPT7','LPT8','LPT9'
+]);
+
 function getMediaCategory(filename) {
   const ext = filename.split('.').pop().toLowerCase();
   for (const [category, exts] of Object.entries(MEDIA_CATEGORIES)) {
@@ -27,7 +33,7 @@ function getLocalFilename(url) {
       filename = filename.substring(0, 200 - ext.length) + ext;
     }
     const category = getMediaCategory(filename);
-    return `${category}/${filename}`;
+    return category + '/' + filename;
   } catch (e) {
     return 'others/resource_' + Math.abs(hashCode(url)) + '.bin';
   }
@@ -62,21 +68,24 @@ function getShortUrl(url) {
 }
 
 function sanitizeFileName(name) {
-  if (!name) return '未命名页面';
+  if (!name) return 'unnamed_page';
   let safe = name.replace(/[\\/:*?"<>|]/g, '_').trim();
+  safe = safe.replace(/^\.+/, '').replace(/\.+$/, '');
   if (safe.length > 100) safe = safe.substring(0, 100);
-  return safe || '未命名页面';
+  safe = safe.replace(/ +$/, '').replace(/\.+$/, '');
+  safe = WINDOWS_RESERVED.has(safe.toUpperCase()) ? safe + '_' : safe;
+  return safe || 'unnamed_page';
 }
 
 function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise(function(resolve) { setTimeout(resolve, ms); });
 }
 
 function checkSpecialPage(url) {
   if (!url) return { isSpecial: true, reason: '无法获取当前页面 URL' };
   try {
-    const urlObj = new URL(url);
-    const protocol = urlObj.protocol;
+    var urlObj = new URL(url);
+    var protocol = urlObj.protocol;
     if (['chrome:', 'chrome-extension:'].includes(protocol))
       return { isSpecial: true, reason: '无法保存 Chrome 内部页面' };
     if (['edge:', 'edge-extension:'].includes(protocol))

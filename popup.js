@@ -1,6 +1,7 @@
 var saveBtn = document.getElementById('saveBtn');
 var openFolderBtn = document.getElementById('openFolderBtn');
 var newSaveBtn = document.getElementById('newSaveBtn');
+var settingsLink = document.getElementById('settingsLink');
 var progressArea = document.getElementById('progressArea');
 var progressFill = document.getElementById('progressFill');
 var progressLabel = document.getElementById('progressLabel');
@@ -27,11 +28,74 @@ document.addEventListener('DOMContentLoaded', function() {
     resetUI();
     handleSaveClick();
   });
+  if (settingsLink) {
+    settingsLink.addEventListener('click', function() {
+      chrome.tabs.create({ url: 'chrome://settings/downloads' });
+    });
+  }
 });
+
+function downloadFile(filename, blob) {
+  return new Promise(function(resolve, reject) {
+    var url = URL.createObjectURL(blob);
+    chrome.downloads.download({
+      url: url,
+      filename: filename,
+      saveAs: false,
+      conflictAction: 'uniquify'
+    }, function(id) {
+      URL.revokeObjectURL(url);
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else {
+        resolve(id);
+      }
+    });
+  });
+}
+
+async function checkDownloadSetting() {
+  var probeBlob = new Blob(['.'], { type: 'text/plain' });
+  var probeUrl = URL.createObjectURL(probeBlob);
+  try {
+    var probeId = await new Promise(function(resolve, reject) {
+      chrome.downloads.download({
+        url: probeUrl,
+        filename: '__probe_remove__.txt',
+        saveAs: false
+      }, function(id) {
+        URL.revokeObjectURL(probeUrl);
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve(id);
+        }
+      });
+    });
+    chrome.downloads.erase({ id: probeId });
+    chrome.downloads.removeFile(probeId);
+    return true;
+  } catch (e) {
+    URL.revokeObjectURL(probeUrl);
+    return false;
+  }
+}
 
 async function handleSaveClick() {
   resetUI();
   setSaving(true);
+  setStatus('检测下载设置...');
+
+  var canDownload = await checkDownloadSetting();
+  if (!canDownload) {
+    showResult('error', '检测到浏览器开启了「下载前询问每个文件的保存位置」，\n请点击下方的「设置」按钮关闭此功能，\n然后重新尝试保存。');
+    setSaving(false);
+    if (settingsLink) {
+      settingsLink.textContent = '打开下载设置';
+    }
+    return;
+  }
+
   setStatus('正在提取页面内容...');
 
   try {
@@ -74,29 +138,14 @@ async function handleSaveClick() {
     setProgressLabel('正在保存 HTML 文件...');
     setStatus('0 / ' + (total + 1));
 
-    await chrome.runtime.sendMessage({ action: 'setBaseDir', baseDir: ROOT_DIR });
-
     var htmlBlob = new Blob([response.html], { type: 'text/html;charset=utf-8' });
-    var htmlUrl = URL.createObjectURL(htmlBlob);
-    var htmlId = await new Promise(function(resolve, reject) {
-      chrome.downloads.download({
-        url: htmlUrl,
-        filename: htmlFile,
-        saveAs: false,
-        conflictAction: 'uniquify'
-      }, function(id) {
-        URL.revokeObjectURL(htmlUrl);
-        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-        else resolve(id);
-      });
-    });
+    var htmlId = await downloadFile(htmlFile, htmlBlob);
     savedDownloadId = htmlId;
 
     setProgress(1, total + 1);
     setStatus('1 / ' + (total + 1));
 
     if (total === 0) {
-      await chrome.runtime.sendMessage({ action: 'clearBaseDir' });
       setProgressLabel('保存完成');
       showResult('success', '保存成功！\nHTML 文件已下载（页面无媒体资源）\n文件位置: ' + htmlFile);
       openFolderBtn.classList.remove('hidden');
@@ -109,13 +158,10 @@ async function handleSaveClick() {
 
     for (var i = 0; i < total; i++) {
       var url = response.mediaUrls[i];
-      var fileDownloaded = false;
-
       try {
         setProgressLabel('下载 (' + (i + 1) + '/' + total + '): ' + getShortUrl(url));
         setStatus((i + 1) + ' / ' + (total + 1));
 
-        // Method 1: Download directly via background (uses original URL)
         var shortName = getLocalFilename(url);
         var uniqueName = shortName;
         var counter = 1;
@@ -130,15 +176,14 @@ async function handleSaveClick() {
 
         var filePath = ROOT_DIR + '/' + mediaDir + '/' + uniqueName;
 
-        var bgResult = await chrome.runtime.sendMessage({
-          action: 'downloadFile',
-          url: url,
-          filePath: filePath
-        });
-
-        if (bgResult && bgResult.success) {
+        // Method 1: try direct URL download via chrome.downloads.download
+        var directOk = await tryDirectDownload(url, filePath);
+        if (directOk) {
           downloadedCount++;
-          fileDownloaded = true;
+        } else {
+          // Method 2: fetch + blob download
+          var blobOk = await tryFetchDownload(url, filePath);
+          if (blobOk) downloadedCount++;
         }
       } catch (e) {
         console.warn('跳过:', url, e.message);
@@ -146,8 +191,6 @@ async function handleSaveClick() {
 
       setProgress(i + 2, total + 1);
     }
-
-    await chrome.runtime.sendMessage({ action: 'clearBaseDir' });
 
     setProgress(total + 1, total + 1);
     setProgressLabel('保存完成');
@@ -157,10 +200,44 @@ async function handleSaveClick() {
 
   } catch (err) {
     showResult('error', err.message || '保存过程中发生错误');
-    try { chrome.runtime.sendMessage({ action: 'clearBaseDir' }); } catch (e) {}
   } finally {
     setSaving(false);
   }
+}
+
+function tryDirectDownload(url, filePath) {
+  return new Promise(function(resolve) {
+    try {
+      chrome.downloads.download({
+        url: url,
+        filename: filePath,
+        saveAs: false,
+        conflictAction: 'uniquify'
+      }, function(id) {
+        if (chrome.runtime.lastError) resolve(false);
+        else resolve(true);
+      });
+    } catch (e) {
+      resolve(false);
+    }
+  });
+}
+
+async function tryFetchDownload(url, filePath) {
+  for (var attempt = 1; attempt <= 2; attempt++) {
+    try {
+      var response = await fetch(url, { method: 'GET', credentials: 'include' });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      var blob = await response.blob();
+      await downloadFile(filePath, blob);
+      return true;
+    } catch (e) {
+      if (attempt < 2) {
+        await new Promise(function(r) { setTimeout(r, 1000); });
+      }
+    }
+  }
+  return false;
 }
 
 function resetUI() {
@@ -175,6 +252,7 @@ function resetUI() {
   statImages.textContent = '-';
   statOthers.textContent = '-';
   savedDownloadId = null;
+  if (settingsLink) settingsLink.textContent = '设置';
 }
 
 function setSaving(active) {

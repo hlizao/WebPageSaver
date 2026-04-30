@@ -1,1 +1,124 @@
-<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'"><title>网页保存助手</title><style>body{width:340px;margin:0;padding:20px;font-family:-apple-system,"Microsoft YaHei",sans-serif;background:linear-gradient(135deg,#f7f8fa,#e8ecf1)}h1{font-size:20px;margin:0 0 16px;text-align:center;color:#1a73e8}button{width:100%;padding:12px;margin-bottom:12px;border:none;border-radius:8px;font-size:15px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.1)}#saveBtn{background:linear-gradient(135deg,#1a73e8,#1557b0);color:#fff}#openFolderBtn{background:linear-gradient(135deg,#fbbc04,#f9a825);color:#333;display:none}.progress-bar-wrap{height:10px;background:#e0e0e0;border-radius:5px;margin:10px 0}.progress-bar{height:100%;width:0;background:linear-gradient(90deg,#34a853,#2e7d32);border-radius:5px;transition:width 0.3s}#resultArea{padding:10px;margin-top:10px;border-radius:6px;text-align:center;display:none}#resultArea.success{background:#e6f4ea;color:#137333}#resultArea.error{background:#fce8e6;color:#c5221f}.version{text-align:center;font-size:11px;color:#999;margin-top:16px}</style></head><body><h1>🌐 网页保存助手</h1><button id="saveBtn">💾 保存当前网页</button><button id="openFolderBtn">📁 打开文件夹</button><div class="progress-bar-wrap"><div class="progress-bar" id="progressBar"></div></div><div id="statusText">准备中...</div><div id="resultArea"></div><div class="version">v2.0.0</div><script src="popup.js"></script></body></html>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'">
+  <title>网页保存助手</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 360px;
+      padding: 20px;
+      font-family: -apple-system, "Microsoft YaHei", sans-serif;
+      background: linear-gradient(135deg, #f7f8fa, #e8ecf1);
+    }
+    h1 {
+      font-size: 20px;
+      margin-bottom: 16px;
+      text-align: center;
+      color: #1a73e8;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      margin-bottom: 10px;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      transition: opacity 0.2s;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    #saveBtn {
+      background: linear-gradient(135deg, #1a73e8, #1557b0);
+      color: #fff;
+    }
+    #confirmBtn {
+      background: linear-gradient(135deg, #34a853, #2e7d32);
+      color: #fff;
+      display: none;
+    }
+    #openFolderBtn {
+      background: linear-gradient(135deg, #fbbc04, #f9a825);
+      color: #333;
+      display: none;
+    }
+    .progress-area {
+      margin: 12px 0;
+      display: none;
+    }
+    .progress-area.active { display: block; }
+    .progress-bar-wrap {
+      height: 10px;
+      background: #e0e0e0;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    .progress-bar {
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, #34a853, #2e7d32);
+      border-radius: 5px;
+      transition: width 0.3s;
+    }
+    .progress-count {
+      text-align: right;
+      font-size: 12px;
+      color: #666;
+      margin-top: 4px;
+    }
+    #statusText {
+      font-size: 13px;
+      color: #555;
+      text-align: center;
+      margin: 8px 0;
+      word-break: break-all;
+    }
+    #resultArea {
+      padding: 10px;
+      margin-top: 8px;
+      border-radius: 6px;
+      text-align: center;
+      font-size: 14px;
+      display: none;
+      white-space: pre-line;
+    }
+    #resultArea.success {
+      display: block;
+      background: #e6f4ea;
+      color: #137333;
+    }
+    #resultArea.error {
+      display: block;
+      background: #fce8e6;
+      color: #c5221f;
+    }
+    .version {
+      text-align: center;
+      font-size: 11px;
+      color: #999;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+  <h1>网页保存助手</h1>
+  <button id="saveBtn">保存当前网页</button>
+  <button id="confirmBtn">确认保存</button>
+  <button id="openFolderBtn">打开文件夹</button>
+  <div class="progress-area" id="progressArea">
+    <div class="progress-bar-wrap">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    <div class="progress-count" id="progressCount">0 / 0</div>
+  </div>
+  <div id="statusText">准备中...</div>
+  <div id="resultArea"></div>
+  <div class="version">v2.1.0</div>
+  <script src="popup.js"></script>
+</body>
+</html>

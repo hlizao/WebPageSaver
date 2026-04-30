@@ -2,236 +2,341 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'">
   <title>网页保存助手</title>
   <style>
+    :root {
+      --primary: #1a73e8;
+      --primary-hover: #1557b0;
+      --primary-light: #e8f0fe;
+      --success: #34a853;
+      --success-light: #e6f4ea;
+      --error: #ea4335;
+      --error-light: #fce8e6;
+      --text-primary: #202124;
+      --text-secondary: #5f6368;
+      --text-tertiary: #80868b;
+      --border: #e0e0e0;
+      --bg: #fff;
+      --bg-hover: #f8f9fa;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+      --radius: 12px;
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      width: 400px;
-      padding: 20px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
-      background: #f0f2f5;
-      color: #1d1d1f;
+      width: 380px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text-primary);
+      font-size: 14px;
+      line-height: 1.5;
+      user-select: none;
     }
 
-    .header {
+    /* ===== Top Bar ===== */
+    .topbar {
       display: flex;
       align-items: center;
+      padding: 16px 20px 12px;
       gap: 12px;
-      margin-bottom: 16px;
+      border-bottom: 1px solid var(--border);
     }
-    .header-icon {
-      width: 40px;
-      height: 40px;
-      background: linear-gradient(135deg, #2563eb, #1d4ed8);
-      border-radius: 12px;
+    .topbar-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
+      background: var(--primary);
       flex-shrink: 0;
-      box-shadow: 0 2px 8px rgba(37,99,235,0.3);
     }
-    .header-icon svg { width: 22px; height: 22px; fill: #fff; }
-    .header-text { flex: 1; }
-    .header-text h1 {
-      font-size: 18px;
-      font-weight: 600;
-      color: #1d1d1f;
-      line-height: 1.3;
-    }
-    .header-text .subtitle {
-      font-size: 12px;
-      color: #86868b;
+    .topbar-icon svg { width: 20px; height: 20px; fill: #fff; }
+    .topbar-title { font-size: 16px; font-weight: 600; }
+    .topbar-badge {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--text-tertiary);
+      background: #f1f3f4;
+      padding: 2px 8px;
+      border-radius: 10px;
     }
 
-    .card {
-      background: #fff;
-      border-radius: 14px;
-      padding: 16px 20px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-      margin-bottom: 10px;
-      transition: all 0.2s;
-    }
+    /* ===== Main Content ===== */
+    .content { padding: 16px 20px; }
 
+    /* ===== Buttons ===== */
     .btn {
-      width: 100%;
-      padding: 13px;
-      border: none;
-      border-radius: 12px;
-      font-size: 15px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.2s;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-    }
-    .btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-      transform: none !important;
-      box-shadow: none !important;
-    }
-
-    .btn-primary {
-      background: linear-gradient(135deg, #2563eb, #1d4ed8);
-      color: #fff;
-      box-shadow: 0 2px 8px rgba(37,99,235,0.3);
-    }
-    .btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(37,99,235,0.4); }
-    .btn-primary:active:not(:disabled) { transform: translateY(0); }
-
-    .btn-secondary {
-      background: #f5f5f7;
-      color: #1d1d1f;
-    }
-    .btn-secondary:hover:not(:disabled) { background: #e8e8ed; }
-
-    .btn-success {
-      background: #ecfdf5;
-      color: #065f46;
-      border: 1px solid #a7f3d0;
-      display: none;
-    }
-    .btn-success:hover:not(:disabled) { background: #d1fae5; }
-
-    .progress-card { display: none; }
-    .progress-card.active { display: block; }
-
-    .progress-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 10px;
-    }
-    .progress-title {
+      gap: 10px;
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: var(--radius);
       font-size: 14px;
       font-weight: 500;
-      color: #1d1d1f;
+      cursor: pointer;
+      transition: all 0.15s;
+      outline: none;
     }
-    .progress-count {
-      font-size: 13px;
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: default;
+      transform: none !important;
+    }
+    .btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+      box-shadow: 0 1px 3px rgba(26,115,232,0.3);
+    }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-hover); box-shadow: 0 2px 6px rgba(26,115,232,0.4); }
+
+    .btn-secondary {
+      background: var(--bg);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover:not(:disabled) { background: var(--bg-hover); }
+
+    .btn-success {
+      background: var(--success-light);
+      color: var(--success);
+      border: 1px solid #a8e6c0;
+    }
+    .btn-success:hover:not(:disabled) { background: #d5f0e0; }
+
+    /* ===== Action Row (two buttons side by side) ===== */
+    .action-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+    .action-row .btn { flex: 1; }
+
+    /* ===== Divider ===== */
+    .divider { height: 1px; background: var(--border); margin: 16px 0; }
+
+    /* ===== Section Title ===== */
+    .section-title {
+      font-size: 11px;
       font-weight: 600;
-      color: #2563eb;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-tertiary);
+      margin-bottom: 10px;
     }
 
+    /* ===== Stats Row ===== */
+    .stats {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .stat-item {
+      flex: 1;
+      background: var(--bg-hover);
+      border-radius: 8px;
+      padding: 10px 12px;
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .stat-label {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      margin-top: 2px;
+    }
+
+    /* ===== Progress ===== */
+    .progress-card {
+      margin-bottom: 16px;
+      display: none;
+    }
+    .progress-card.active { display: block; }
+
     .progress-bar-wrap {
-      height: 8px;
-      background: #e8e8ed;
-      border-radius: 4px;
+      height: 6px;
+      background: #e8eaed;
+      border-radius: 3px;
       overflow: hidden;
       margin-bottom: 8px;
     }
-    .progress-bar {
+    .progress-fill {
       height: 100%;
       width: 0%;
-      background: linear-gradient(90deg, #2563eb, #3b82f6);
-      border-radius: 4px;
-      transition: width 0.3s ease;
+      background: var(--primary);
+      border-radius: 3px;
+      transition: width 0.25s ease;
     }
 
-    #statusText {
-      font-size: 13px;
-      color: #86868b;
-      line-height: 1.4;
-      word-break: break-all;
-    }
-
-    #resultArea {
-      padding: 0;
-      border-radius: 10px;
-      font-size: 13px;
-      line-height: 1.5;
-      display: none;
-      white-space: pre-line;
-    }
-
-    #resultArea.success {
-      display: block;
-      color: #065f46;
-    }
-
-    #resultArea.error {
-      display: block;
-      color: #991b1b;
-    }
-
-    .footer {
+    .progress-info {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-top: 2px;
-      padding: 0 4px;
     }
-    .version {
-      font-size: 11px;
-      color: #c7c7cc;
+    .progress-label {
+      font-size: 12px;
+      color: var(--text-secondary);
     }
-    .save-path {
-      font-size: 11px;
-      color: #c7c7cc;
-      max-width: 200px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+    .progress-pct {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--primary);
     }
 
+    /* ===== Status / Result ===== */
+    .status-bar {
+      font-size: 12px;
+      color: var(--text-secondary);
+      padding: 4px 0;
+      min-height: 20px;
+    }
+
+    .result-banner {
+      display: none;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.5;
+      margin-bottom: 12px;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .result-banner.visible { display: flex; }
+    .result-banner svg { width: 20px; height: 20px; flex-shrink: 0; margin-top: 1px; }
+
+    .result-banner.success {
+      background: var(--success-light);
+      color: #1e7e34;
+    }
+    .result-banner.success svg { fill: var(--success); }
+
+    .result-banner.error {
+      background: var(--error-light);
+      color: #c5221f;
+    }
+    .result-banner.error svg { fill: var(--error); }
+
+    /* ===== Spinner ===== */
     .spinner {
       display: inline-block;
-      width: 16px;
-      height: 16px;
-      border: 2px solid rgba(255,255,255,0.3);
+      width: 18px;
+      height: 18px;
+      border: 2.5px solid rgba(255,255,255,0.3);
       border-top-color: #fff;
       border-radius: 50%;
       animation: spin 0.6s linear infinite;
+      flex-shrink: 0;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    .btn-icon { width: 18px; height: 18px; fill: currentColor; flex-shrink: 0; }
+    /* ===== Bottom Footer ===== */
+    .footer {
+      padding: 12px 20px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .footer-link {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .footer-link:hover { color: var(--primary); }
+    .footer-version { font-size: 11px; color: var(--text-tertiary); }
+
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
-  <div class="header">
-    <div class="header-icon">
+  <!-- Top Bar -->
+  <div class="topbar">
+    <div class="topbar-icon">
       <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zM6 20V4h7v5h5v11H6z"/></svg>
     </div>
-    <div class="header-text">
-      <h1>网页保存助手</h1>
-      <div class="subtitle">完整保存当前网页到本地</div>
-    </div>
+    <span class="topbar-title">网页保存助手</span>
+    <span class="topbar-badge">v2.1.0</span>
   </div>
 
-  <div class="card">
+  <!-- Main Content -->
+  <div class="content">
+
+    <!-- Save Button -->
     <button class="btn btn-primary" id="saveBtn">
-      <svg class="btn-icon" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
-      保存当前网页
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+      <span id="saveBtnText">保存当前网页</span>
     </button>
-  </div>
 
-  <div class="card progress-card" id="progressArea">
-    <div class="progress-header">
-      <span class="progress-title">保存进度</span>
-      <span class="progress-count" id="progressCount">0 / 0</span>
+    <div class="divider"></div>
+
+    <!-- Stats -->
+    <div class="section-title">页面信息</div>
+    <div class="stats">
+      <div class="stat-item">
+        <div class="stat-value" id="statMedia">-</div>
+        <div class="stat-label">媒体资源</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" id="statImages">-</div>
+        <div class="stat-label">图片</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" id="statOthers">-</div>
+        <div class="stat-label">其他文件</div>
+      </div>
     </div>
-    <div class="progress-bar-wrap">
-      <div class="progress-bar" id="progressBar"></div>
+
+    <!-- Progress -->
+    <div class="progress-card" id="progressArea">
+      <div class="section-title">保存进度</div>
+      <div class="progress-bar-wrap">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="progress-info">
+        <span class="progress-label" id="progressLabel">准备中...</span>
+        <span class="progress-pct" id="progressPct">0%</span>
+      </div>
     </div>
-    <div id="statusText">准备中...</div>
+
+    <!-- Status -->
+    <div class="status-bar">
+      <span id="statusText">就绪</span>
+    </div>
+
+    <!-- Result Banner -->
+    <div class="result-banner" id="resultBanner">
+      <svg viewBox="0 0 24 24" id="resultIcon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+      <span id="resultText"></span>
+    </div>
+
+    <!-- Action Row (Open Folder + New Save) -->
+    <div class="action-row">
+      <button class="btn btn-success hidden" id="openFolderBtn">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"/></svg>
+        <span>打开文件夹</span>
+      </button>
+      <button class="btn btn-secondary hidden" id="newSaveBtn">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+        <span>再次保存</span>
+      </button>
+    </div>
   </div>
 
-  <div class="card" style="padding:0;background:transparent;box-shadow:none;">
-    <button class="btn btn-success" id="openFolderBtn">
-      <svg class="btn-icon" viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"/></svg>
-      打开下载文件夹
-    </button>
-  </div>
-
-  <div id="resultArea"></div>
-
+  <!-- Footer -->
   <div class="footer">
-    <span class="version">v2.1.0</span>
-    <span class="save-path" id="fileInfo"></span>
+    <a class="footer-link" id="settingsLink">设置</a>
+    <span class="footer-version">Chrome Extension</span>
   </div>
 
   <script src="shared.js"></script>

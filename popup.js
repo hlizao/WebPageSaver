@@ -1,26 +1,35 @@
 const saveBtn = document.getElementById('saveBtn');
+const saveBtnText = document.getElementById('saveBtnText');
 const openFolderBtn = document.getElementById('openFolderBtn');
+const newSaveBtn = document.getElementById('newSaveBtn');
 const progressArea = document.getElementById('progressArea');
-const progressBar = document.getElementById('progressBar');
-const progressCount = document.getElementById('progressCount');
+const progressFill = document.getElementById('progressFill');
+const progressLabel = document.getElementById('progressLabel');
+const progressPct = document.getElementById('progressPct');
 const statusText = document.getElementById('statusText');
-const resultArea = document.getElementById('resultArea');
-const fileInfo = document.getElementById('fileInfo');
+const resultBanner = document.getElementById('resultBanner');
+const resultText = document.getElementById('resultText');
+const resultIcon = document.getElementById('resultIcon');
+const statMedia = document.getElementById('statMedia');
+const statImages = document.getElementById('statImages');
+const statOthers = document.getElementById('statOthers');
 
 let pendingData = null;
-let savedFolderPath = null;
 let savedDownloadId = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   saveBtn.addEventListener('click', handleSaveClick);
   openFolderBtn.addEventListener('click', handleOpenFolder);
+  newSaveBtn.addEventListener('click', () => {
+    resetUI();
+    handleSaveClick();
+  });
 });
 
 async function handleSaveClick() {
   resetUI();
-  saveBtn.disabled = true;
-  saveBtn.innerHTML = '<span class="spinner"></span> 处理中...';
-  updateStatus('正在提取页面内容...');
+  setSaving(true);
+  setStatus('正在提取页面内容...');
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -44,6 +53,16 @@ async function handleSaveClick() {
       throw new Error(response?.error || '页面提取失败');
     }
 
+    // Show stats
+    const total = response.mediaUrls.length;
+    const imgCount = response.mediaUrls.filter(u => {
+      const ext = u.split('?')[0].split('.').pop().toLowerCase();
+      return ['jpg','jpeg','png','gif','webp','svg','bmp','ico','avif'].includes(ext);
+    }).length;
+    statMedia.textContent = total;
+    statImages.textContent = imgCount;
+    statOthers.textContent = total - imgCount;
+
     const folderName = sanitizeFileName(response.title || tab.title || '未命名页面');
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const saveDir = `${folderName}_${timestamp}`;
@@ -55,9 +74,9 @@ async function handleSaveClick() {
       baseDir: saveDir
     };
 
-    progressArea.classList.add('active');
-    updateStatus('正在保存 HTML 文件...');
-    updateProgress(0, response.mediaUrls.length + 1);
+    showProgress(true);
+    setProgress(0, total + 1);
+    setProgressLabel('正在保存 HTML 文件...');
 
     const htmlBlob = new Blob([response.html], { type: 'text/html;charset=utf-8' });
     const dataUrl = await blobToDataUrl(htmlBlob);
@@ -73,11 +92,11 @@ async function handleSaveClick() {
       });
     });
 
-    savedFolderPath = saveDir;
     savedDownloadId = htmlDownloadId;
 
-    updateProgress(1, response.mediaUrls.length + 1);
-    updateStatus(`开始下载 ${response.mediaUrls.length} 个媒体资源...`);
+    setProgress(1, total + 1);
+    setProgressLabel(`已保存 HTML，开始下载 ${total} 个媒体资源...`);
+    setStatus(`正在下载 0 / ${total}`);
 
     const saveResult = await chrome.runtime.sendMessage({
       action: 'savePage',
@@ -87,17 +106,18 @@ async function handleSaveClick() {
     });
 
     if (saveResult && saveResult.success) {
-      updateProgress(response.mediaUrls.length + 1, response.mediaUrls.length + 1);
-      showSuccess(`保存成功！HTML 文件 + ${saveResult.downloadedCount} 个媒体资源已下载`);
-      openFolderBtn.style.display = 'flex';
+      setProgress(total + 1, total + 1);
+      setProgressLabel('保存完成');
+      showResult('success', `保存成功！HTML 文件 + ${saveResult.downloadedCount} 个资源已下载`);
+      openFolderBtn.classList.remove('hidden');
+      newSaveBtn.classList.remove('hidden');
     } else {
       throw new Error(saveResult?.error || '保存失败');
     }
   } catch (err) {
-    showError(err.message || '保存过程中发生错误');
+    showResult('error', err.message || '保存过程中发生错误');
   } finally {
-    saveBtn.disabled = false;
-    saveBtn.innerHTML = '<svg class="btn-icon" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> 保存当前网页';
+    setSaving(false);
     pendingData = null;
   }
 }
@@ -108,20 +128,6 @@ async function handleOpenFolder() {
       chrome.downloads.show(savedDownloadId);
       return;
     } catch (e) {}
-  }
-
-  if (savedFolderPath) {
-    chrome.downloads.search({
-      query: [savedFolderPath]
-    }, (results) => {
-      if (results && results.length > 0) {
-        chrome.downloads.show(results[0].id);
-      } else {
-        showError('未找到已下载的文件');
-      }
-    });
-  } else {
-    showError('没有可打开的文件夹');
   }
 }
 
@@ -135,39 +141,59 @@ function blobToDataUrl(blob) {
 }
 
 function resetUI() {
-  progressBar.style.width = '0%';
-  progressCount.textContent = '0 / 0';
-  statusText.textContent = '准备中...';
-  resultArea.className = '';
-  resultArea.textContent = '';
-  resultArea.style.display = 'none';
-  progressArea.classList.remove('active');
-  openFolderBtn.style.display = 'none';
-  savedFolderPath = null;
+  progressFill.style.width = '0%';
+  progressPct.textContent = '0%';
+  showProgress(false);
+  setStatus('就绪');
+  hideResult();
+  openFolderBtn.classList.add('hidden');
+  newSaveBtn.classList.add('hidden');
+  statMedia.textContent = '-';
+  statImages.textContent = '-';
+  statOthers.textContent = '-';
   savedDownloadId = null;
-  if (fileInfo) fileInfo.textContent = '';
 }
 
-function updateStatus(text) {
+function setSaving(active) {
+  saveBtn.disabled = active;
+  if (active) {
+    saveBtn.innerHTML = '<span class="spinner"></span><span>保存中...</span>';
+  } else {
+    saveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" style="width:18px;height:18px"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><span id="saveBtnText">保存当前网页</span>';
+  }
+}
+
+function setStatus(text) {
   statusText.textContent = text;
 }
 
-function updateProgress(current, total) {
-  const percent = total > 0 ? Math.round((current / total) * 100) : 0;
-  progressBar.style.width = percent + '%';
-  progressCount.textContent = `${current} / ${total}`;
+function showProgress(show) {
+  progressArea.classList.toggle('active', show);
 }
 
-function showSuccess(msg) {
-  resultArea.className = 'success';
-  resultArea.textContent = msg;
-  resultArea.style.display = 'block';
+function setProgress(current, total) {
+  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+  progressFill.style.width = pct + '%';
+  progressPct.textContent = pct + '%';
 }
 
-function showError(msg) {
-  resultArea.className = 'error';
-  resultArea.textContent = msg;
-  resultArea.style.display = 'block';
+function setProgressLabel(text) {
+  progressLabel.textContent = text;
+}
+
+function showResult(type, msg) {
+  resultBanner.className = 'result-banner visible ' + type;
+  resultText.textContent = msg;
+  if (type === 'success') {
+    resultIcon.innerHTML = '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>';
+  } else {
+    resultIcon.innerHTML = '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>';
+  }
+}
+
+function hideResult() {
+  resultBanner.className = 'result-banner';
+  resultText.textContent = '';
 }
 
 async function injectAndExtract(tabId) {
@@ -191,9 +217,11 @@ async function injectAndExtract(tabId) {
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message.action === 'downloadProgress') {
-    const total = pendingData ? pendingData.mediaUrls.length + 1 : 1;
-    updateProgress(Math.min(message.current + 1, total), total);
-    updateStatus(message.status || `正在下载资源... (${message.current}/${message.total})`);
+    const total = pendingData ? pendingData.mediaUrls.length : 0;
+    const completed = Math.min(message.current, total);
+    setProgress(completed + 1, total + 1);
+    setProgressLabel(`正在下载: ${message.status || `${completed}/${total}`}`);
+    setStatus(`正在下载 ${completed} / ${total}`);
   }
   return false;
 });

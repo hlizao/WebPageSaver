@@ -62,7 +62,7 @@ chrome-save-page-extension/
 git clone https://github.com/hlizao/WebPageSaver.git
 
 # 进入项目目录
-cd chrome-save-page-extension
+cd WebPageSaver
 ```
 
 ### 2. 加载已解压的扩展程序

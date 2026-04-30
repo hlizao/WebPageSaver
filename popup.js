@@ -9,6 +9,7 @@ const fileInfo = document.getElementById('fileInfo');
 
 let pendingData = null;
 let savedFolderPath = null;
+let savedDownloadId = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   saveBtn.addEventListener('click', handleSaveClick);
@@ -55,13 +56,13 @@ async function handleSaveClick() {
     };
 
     progressArea.classList.add('active');
-    updateStatus(`正在保存 HTML 文件...`);
+    updateStatus('正在保存 HTML 文件...');
     updateProgress(0, response.mediaUrls.length + 1);
 
     const htmlBlob = new Blob([response.html], { type: 'text/html;charset=utf-8' });
     const dataUrl = await blobToDataUrl(htmlBlob);
 
-    await new Promise((resolve, reject) => {
+    const htmlDownloadId = await new Promise((resolve, reject) => {
       chrome.downloads.download({
         url: dataUrl,
         filename: htmlFileName,
@@ -71,6 +72,9 @@ async function handleSaveClick() {
         else resolve(id);
       });
     });
+
+    savedFolderPath = saveDir;
+    savedDownloadId = htmlDownloadId;
 
     updateProgress(1, response.mediaUrls.length + 1);
     updateStatus(`开始下载 ${response.mediaUrls.length} 个媒体资源...`);
@@ -83,10 +87,9 @@ async function handleSaveClick() {
     });
 
     if (saveResult && saveResult.success) {
-      savedFolderPath = saveDir;
       updateProgress(response.mediaUrls.length + 1, response.mediaUrls.length + 1);
-      showSuccess(`保存成功！\nHTML 文件 + ${saveResult.downloadedCount} 个媒体资源已下载`);
-      openFolderBtn.style.display = 'block';
+      showSuccess(`保存成功！HTML 文件 + ${saveResult.downloadedCount} 个媒体资源已下载`);
+      openFolderBtn.style.display = 'flex';
     } else {
       throw new Error(saveResult?.error || '保存失败');
     }
@@ -94,26 +97,32 @@ async function handleSaveClick() {
     showError(err.message || '保存过程中发生错误');
   } finally {
     saveBtn.disabled = false;
-    saveBtn.textContent = '保存当前网页';
+    saveBtn.innerHTML = '<svg class="btn-icon" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> 保存当前网页';
     pendingData = null;
   }
 }
 
 async function handleOpenFolder() {
-  if (!savedFolderPath) {
-    showError('无法获取保存路径');
-    return;
+  if (savedDownloadId) {
+    try {
+      chrome.downloads.show(savedDownloadId);
+      return;
+    } catch (e) {}
   }
 
-  chrome.downloads.search({
-    filenameRegex: '^' + savedFolderPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '.*'
-  }, (results) => {
-    if (results && results.length > 0) {
-      chrome.downloads.show(results[0].id);
-    } else {
-      showError('未找到保存的文件夹');
-    }
-  });
+  if (savedFolderPath) {
+    chrome.downloads.search({
+      query: [savedFolderPath]
+    }, (results) => {
+      if (results && results.length > 0) {
+        chrome.downloads.show(results[0].id);
+      } else {
+        showError('未找到已下载的文件');
+      }
+    });
+  } else {
+    showError('没有可打开的文件夹');
+  }
 }
 
 function blobToDataUrl(blob) {
@@ -135,6 +144,7 @@ function resetUI() {
   progressArea.classList.remove('active');
   openFolderBtn.style.display = 'none';
   savedFolderPath = null;
+  savedDownloadId = null;
   if (fileInfo) fileInfo.textContent = '';
 }
 
@@ -150,13 +160,13 @@ function updateProgress(current, total) {
 
 function showSuccess(msg) {
   resultArea.className = 'success';
-  resultArea.innerHTML = msg.replace(/\n/g, '<br>');
+  resultArea.textContent = msg;
   resultArea.style.display = 'block';
 }
 
 function showError(msg) {
   resultArea.className = 'error';
-  resultArea.innerHTML = '保存失败：' + msg.replace(/\n/g, '<br>');
+  resultArea.textContent = msg;
   resultArea.style.display = 'block';
 }
 

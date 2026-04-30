@@ -8,7 +8,7 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       width: 400px;
-      padding: 24px;
+      padding: 20px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
       background: #f0f2f5;
       color: #1d1d1f;
@@ -18,7 +18,7 @@
       display: flex;
       align-items: center;
       gap: 12px;
-      margin-bottom: 20px;
+      margin-bottom: 16px;
     }
     .header-icon {
       width: 40px;
@@ -31,7 +31,7 @@
       flex-shrink: 0;
       box-shadow: 0 2px 8px rgba(37,99,235,0.3);
     }
-    .header-icon svg { width: 24px; height: 24px; fill: #fff; }
+    .header-icon svg { width: 22px; height: 22px; fill: #fff; }
     .header-text { flex: 1; }
     .header-text h1 {
       font-size: 18px;
@@ -47,54 +47,54 @@
     .card {
       background: #fff;
       border-radius: 14px;
-      padding: 20px;
+      padding: 16px 20px;
       box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-      margin-bottom: 12px;
+      margin-bottom: 10px;
+      transition: all 0.2s;
     }
 
-    #saveBtn {
+    .btn {
       width: 100%;
-      padding: 14px;
+      padding: 13px;
       border: none;
       border-radius: 12px;
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 500;
       cursor: pointer;
-      background: linear-gradient(135deg, #2563eb, #1d4ed8);
-      color: #fff;
       transition: all 0.2s;
-      box-shadow: 0 2px 8px rgba(37,99,235,0.3);
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
     }
-    #saveBtn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(37,99,235,0.4); }
-    #saveBtn:active { transform: translateY(0); }
-    #saveBtn:disabled {
-      opacity: 0.6;
+    .btn:disabled {
+      opacity: 0.5;
       cursor: not-allowed;
-      transform: none;
+      transform: none !important;
+      box-shadow: none !important;
     }
 
-    #openFolderBtn {
-      width: 100%;
-      padding: 12px;
-      border: none;
-      border-radius: 12px;
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
+    .btn-primary {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(37,99,235,0.3);
+    }
+    .btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(37,99,235,0.4); }
+    .btn-primary:active:not(:disabled) { transform: translateY(0); }
+
+    .btn-secondary {
       background: #f5f5f7;
       color: #1d1d1f;
-      display: none;
-      transition: background 0.2s;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
     }
-    #openFolderBtn:hover { background: #e8e8ed; }
-    #openFolderBtn svg { width: 16px; height: 16px; flex-shrink: 0; }
+    .btn-secondary:hover:not(:disabled) { background: #e8e8ed; }
+
+    .btn-success {
+      background: #ecfdf5;
+      color: #065f46;
+      border: 1px solid #a7f3d0;
+      display: none;
+    }
+    .btn-success:hover:not(:disabled) { background: #d1fae5; }
 
     .progress-card { display: none; }
     .progress-card.active { display: block; }
@@ -139,31 +139,30 @@
     }
 
     #resultArea {
-      padding: 12px 16px;
+      padding: 0;
       border-radius: 10px;
-      font-size: 14px;
+      font-size: 13px;
       line-height: 1.5;
       display: none;
-      margin-top: 0;
+      white-space: pre-line;
     }
+
     #resultArea.success {
       display: block;
-      background: #ecfdf5;
       color: #065f46;
-      border: 1px solid #a7f3d0;
     }
+
     #resultArea.error {
       display: block;
-      background: #fef2f2;
       color: #991b1b;
-      border: 1px solid #fecaca;
     }
 
     .footer {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-top: 4px;
+      margin-top: 2px;
+      padding: 0 4px;
     }
     .version {
       font-size: 11px;
@@ -203,8 +202,8 @@
     </div>
   </div>
 
-  <div class="card" style="padding:0;background:transparent;box-shadow:none;">
-    <button id="saveBtn">
+  <div class="card">
+    <button class="btn btn-primary" id="saveBtn">
       <svg class="btn-icon" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
       保存当前网页
     </button>
@@ -222,15 +221,13 @@
   </div>
 
   <div class="card" style="padding:0;background:transparent;box-shadow:none;">
-    <button id="openFolderBtn">
+    <button class="btn btn-success" id="openFolderBtn">
       <svg class="btn-icon" viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"/></svg>
-      打开保存文件夹
+      打开下载文件夹
     </button>
   </div>
 
-  <div class="card">
-    <div id="resultArea"></div>
-  </div>
+  <div id="resultArea"></div>
 
   <div class="footer">
     <span class="version">v2.1.0</span>

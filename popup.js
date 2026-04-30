@@ -103,7 +103,7 @@ async function handleSaveClick() {
 
     if (total === 0) {
       setProgressLabel('保存完成');
-      showResult('success', '保存成功！HTML 文件已下载（页面无媒体资源）');
+      showResult('success', '保存成功！HTML 文件已下载（页面无媒体资源）\n文件位置: ' + ROOT_DIR + '/' + pageName + '.html');
       openFolderBtn.classList.remove('hidden');
       newSaveBtn.classList.remove('hidden');
       return;
@@ -157,7 +157,7 @@ async function handleSaveClick() {
 
     setProgress(total + 1, total + 1);
     setProgressLabel('保存完成');
-    showResult('success', '保存成功！HTML 文件 + ' + downloadedCount + ' 个资源已下载');
+    showResult('success', '保存成功！HTML 文件 + ' + downloadedCount + ' 个资源已下载\n文件位置: ' + ROOT_DIR + '/' + pageName + '.html');
     openFolderBtn.classList.remove('hidden');
     newSaveBtn.classList.remove('hidden');
 
@@ -174,26 +174,8 @@ async function handleSaveClick() {
 async function handleOpenFolder() {
   if (savedDownloadId) {
     try {
-      chrome.downloads.search({ id: savedDownloadId }, function(items) {
-        if (items && items.length > 0) {
-          var htmlPath = items[0].filename;
-          var dir = htmlPath.substring(0, htmlPath.lastIndexOf('/'));
-          chrome.downloads.search({
-            filenameRegex: '^' + dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '.*'
-          }, function(mediaItems) {
-            if (mediaItems && mediaItems.length > 0) {
-              chrome.downloads.show(mediaItems[mediaItems.length - 1].id);
-            } else {
-              chrome.downloads.show(savedDownloadId);
-            }
-          });
-        } else {
-          chrome.downloads.show(savedDownloadId);
-        }
-      });
-    } catch (e) {
       chrome.downloads.show(savedDownloadId);
-    }
+    } catch (e) {}
   }
 }
 

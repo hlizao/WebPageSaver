@@ -80,13 +80,21 @@ cd chrome-save-page-extension
 3. 在弹出的窗口中点击「保存当前网页」按钮。
 4. 插件会自动提取页面内容和媒体资源，并弹出「另存为」对话框让你确认 HTML 文件的保存位置。
 5. 确认保存位置后，点击「确认保存」按钮，插件开始自动下载所有媒体资源（无需再次弹窗确认）。
-6. 保存完成后，你可以在 Chrome 的默认下载目录中找到保存的文件：
-   - `网页标题_时间戳.html`：完整的网页文件。
-   - `网页标题_时间戳/media/`：该页面使用的所有媒体资源，按类型分类存放：
-     - `media/pictures/`：图片资源（jpg、png、gif、webp、svg 等）
-     - `media/videos/`：视频资源（mp4、webm、mov 等）
-     - `media/audios/`：音频资源（mp3、wav、ogg 等）
-     - `media/others/`：其他类型资源
+6. 保存完成后，你可以在 Chrome 的默认下载目录中找到如下文件结构：
+   ```
+   下载目录/
+   └── WebPageSaver/
+       ├── 页面标题.html
+       └── media/
+           ├── pictures/
+           │   ├── cover.jpg
+           │   ├── avatar_small.png       # CDN @后缀自动转换
+           │   └── icon.svg
+           ├── videos/
+           │   └── clip.mp4
+           └── audios/
+               └── episode.m4a            # 含嵌入JSON提取
+   ```
 7. 双击打开 `.html` 文件，即可在离线状态下完整查看保存的网页。
 
 ## 注意事项

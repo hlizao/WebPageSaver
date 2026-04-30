@@ -13,6 +13,7 @@ var statMedia = document.getElementById('statMedia');
 var statImages = document.getElementById('statImages');
 var statOthers = document.getElementById('statOthers');
 
+var ROOT_DIR = 'WebPageSaver';
 var savedDownloadId = null;
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -26,16 +27,6 @@ document.addEventListener('DOMContentLoaded', function() {
     resetUI();
     handleSaveClick();
   });
-});
-
-chrome.runtime.onMessage.addListener(function(message) {
-  if (message.action === 'progress' && message.data) {
-    var d = message.data;
-    setProgress(d.current, d.total);
-    setProgressLabel(d.status || '');
-    if (d.status) setStatus(d.status);
-  }
-  return false;
 });
 
 async function handleSaveClick() {
@@ -64,7 +55,6 @@ async function handleSaveClick() {
         throw err;
       }
     }
-
     if (!response || !response.success) throw new Error(response ? response.error : '页面提取失败');
 
     var total = response.mediaUrls.length;
@@ -77,38 +67,97 @@ async function handleSaveClick() {
     statOthers.textContent = total - imgCount;
 
     var pageName = sanitizeFileName(response.title || tab.title || '未命名页面');
+    var mediaDir = pageName + '_media';
+    var htmlFile = ROOT_DIR + '/' + pageName + '.html';
 
-    setProgressLabel('正在保存，请等待...');
-    setStatus('正在下载 0 / ' + (total + 1));
+    setProgress(0, total + 1);
+    setProgressLabel('正在保存 HTML 文件...');
+    setStatus('0 / ' + (total + 1));
 
-    var result = await chrome.runtime.sendMessage({
-      action: 'savePage',
-      html: response.html,
-      title: response.title || tab.title || '未命名页面',
-      mediaUrls: response.mediaUrls
+    await chrome.runtime.sendMessage({ action: 'setBaseDir', baseDir: ROOT_DIR });
+
+    var htmlBlob = new Blob([response.html], { type: 'text/html;charset=utf-8' });
+    var htmlUrl = URL.createObjectURL(htmlBlob);
+    var htmlId = await new Promise(function(resolve, reject) {
+      chrome.downloads.download({
+        url: htmlUrl,
+        filename: htmlFile,
+        saveAs: false,
+        conflictAction: 'uniquify'
+      }, function(id) {
+        URL.revokeObjectURL(htmlUrl);
+        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+        else resolve(id);
+      });
     });
+    savedDownloadId = htmlId;
 
-    if (result && result.success) {
-      savedDownloadId = result.htmlId || null;
-      setProgress(total + 1, total + 1);
+    setProgress(1, total + 1);
+    setStatus('1 / ' + (total + 1));
+
+    if (total === 0) {
+      await chrome.runtime.sendMessage({ action: 'clearBaseDir' });
       setProgressLabel('保存完成');
-      showResult('success', '保存成功！\nHTML 文件 + ' + result.downloadedCount + ' 个资源已下载\n文件位置: WebPageSaver/' + pageName + '.html');
+      showResult('success', '保存成功！\nHTML 文件已下载（页面无媒体资源）\n文件位置: ' + htmlFile);
       openFolderBtn.classList.remove('hidden');
       newSaveBtn.classList.remove('hidden');
-
-      if (!savedDownloadId && result.downloadedCount > 0) {
-        try {
-          chrome.downloads.search({ query: ['WebPageSaver/' + pageName] }, function(items) {
-            if (items && items.length > 0) savedDownloadId = items[items.length - 1].id;
-          });
-        } catch (e) {}
-      }
-    } else {
-      throw new Error(result ? result.error : '保存失败');
+      return;
     }
+
+    var downloadedCount = 0;
+    var nameSet = new Set();
+
+    for (var i = 0; i < total; i++) {
+      var url = response.mediaUrls[i];
+      var fileDownloaded = false;
+
+      try {
+        setProgressLabel('下载 (' + (i + 1) + '/' + total + '): ' + getShortUrl(url));
+        setStatus((i + 1) + ' / ' + (total + 1));
+
+        // Method 1: Download directly via background (uses original URL)
+        var shortName = getLocalFilename(url);
+        var uniqueName = shortName;
+        var counter = 1;
+        while (nameSet.has(uniqueName)) {
+          var dot = shortName.lastIndexOf('.');
+          var base = dot > 0 ? shortName.substring(0, dot) : shortName;
+          var ext = dot > 0 ? shortName.substring(dot) : '';
+          uniqueName = base + '_' + counter + ext;
+          counter++;
+        }
+        nameSet.add(uniqueName);
+
+        var filePath = ROOT_DIR + '/' + mediaDir + '/' + uniqueName;
+
+        var bgResult = await chrome.runtime.sendMessage({
+          action: 'downloadFile',
+          url: url,
+          filePath: filePath
+        });
+
+        if (bgResult && bgResult.success) {
+          downloadedCount++;
+          fileDownloaded = true;
+        }
+      } catch (e) {
+        console.warn('跳过:', url, e.message);
+      }
+
+      setProgress(i + 2, total + 1);
+    }
+
+    await chrome.runtime.sendMessage({ action: 'clearBaseDir' });
+
+    setProgress(total + 1, total + 1);
+    setProgressLabel('保存完成');
+    showResult('success', '保存成功！\nHTML 文件 + ' + downloadedCount + ' 个资源已下载\n文件位置: ' + htmlFile);
+    openFolderBtn.classList.remove('hidden');
+    newSaveBtn.classList.remove('hidden');
 
   } catch (err) {
     showResult('error', err.message || '保存过程中发生错误');
+    try { chrome.runtime.sendMessage({ action: 'clearBaseDir' }); } catch (e) {}
   } finally {
     setSaving(false);
   }
@@ -130,11 +179,9 @@ function resetUI() {
 
 function setSaving(active) {
   saveBtn.disabled = active;
-  if (active) {
-    saveBtn.innerHTML = '<span class="spinner"></span><span>保存中...</span>';
-  } else {
-    saveBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" style="width:18px;height:18px"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><span>保存当前网页</span>';
-  }
+  saveBtn.innerHTML = active
+    ? '<span class="spinner"></span><span>保存中...</span>'
+    : '<svg viewBox="0 0 24 24" fill="currentColor" style="width:18px;height:18px"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><span>保存当前网页</span>';
 }
 
 function setStatus(t) { if (statusText) statusText.textContent = t; }
@@ -144,14 +191,15 @@ function setProgress(cur, total) {
   if (!progressFill) return;
   var pct = total > 0 ? Math.round((cur / total) * 100) : 0;
   progressFill.style.width = pct + '%';
-  progressPct.textContent = pct + '%';
+  if (progressPct) progressPct.textContent = pct + '%';
 }
 
 function setProgressLabel(t) { if (progressLabel) progressLabel.textContent = t; }
 
 function showResult(type, msg) {
+  if (!resultBanner) return;
   resultBanner.className = 'result-banner visible ' + type;
-  resultText.textContent = msg;
+  if (resultText) resultText.textContent = msg;
   if (type === 'success') {
     resultIcon.innerHTML = '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>';
   } else {
@@ -160,8 +208,9 @@ function showResult(type, msg) {
 }
 
 function hideResult() {
+  if (!resultBanner) return;
   resultBanner.className = 'result-banner';
-  resultText.textContent = '';
+  if (resultText) resultText.textContent = '';
 }
 
 async function injectAndExtract(tabId) {

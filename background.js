@@ -5,8 +5,10 @@ var probeCallbacks = {};
 
 chrome.downloads.onChanged.addListener(function(delta) {
   if (probeCallbacks[delta.id]) {
-    probeCallbacks[delta.id](delta);
-    delete probeCallbacks[delta.id];
+    var handled = probeCallbacks[delta.id](delta);
+    if (handled) {
+      delete probeCallbacks[delta.id];
+    }
   }
 });
 
@@ -23,16 +25,27 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         var timer = setTimeout(function() {
           if (probeCallbacks[id]) {
             delete probeCallbacks[id];
-            sendResponse({ success: false, probeId: id });
+            chrome.downloads.search({ id: id }, function(items) {
+              if (items && items.length > 0 && items[0].exists) {
+                sendResponse({ success: true, probeId: id });
+              } else {
+                sendResponse({ success: false, probeId: id });
+              }
+            });
           }
         }, 3000);
         probeCallbacks[id] = function(delta) {
-          clearTimeout(timer);
-          if (delta.state && delta.state.current === 'complete') {
-            sendResponse({ success: true, probeId: id });
-          } else if (delta.state && delta.state.current === 'interrupted') {
-            sendResponse({ success: false, probeId: id });
+          if (delta.state) {
+            clearTimeout(timer);
+            if (delta.state.current === 'complete') {
+              sendResponse({ success: true, probeId: id });
+              return true;
+            } else if (delta.state.current === 'interrupted') {
+              sendResponse({ success: false, probeId: id });
+              return true;
+            }
           }
+          return false;
         };
       }
     });

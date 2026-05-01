@@ -250,6 +250,17 @@
     .footer-version { font-size: 11px; color: var(--text-tertiary); }
 
     .hidden { display: none !important; }
+
+    .helper-link {
+      display: block;
+      font-size: 12px;
+      color: var(--text-tertiary);
+      text-decoration: none;
+      cursor: pointer;
+      margin-top: 8px;
+      text-align: center;
+    }
+    .helper-link:hover { color: var(--primary); }
   </style>
 </head>
 <body>
@@ -312,6 +323,9 @@
       <svg viewBox="0 0 24 24" id="resultIcon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
       <span id="resultText"></span>
     </div>
+
+    <!-- Helper Links -->
+    <a href="#" class="helper-link" id="disablePromptLink">关闭下载前询问</a>
 
     <!-- Action Row (Open Folder + New Save) -->
     <div class="action-row">

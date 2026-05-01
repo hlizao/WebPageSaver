@@ -1,6 +1,7 @@
 var saveBtn = document.getElementById('saveBtn');
 var openFolderBtn = document.getElementById('openFolderBtn');
 var newSaveBtn = document.getElementById('newSaveBtn');
+var disablePromptLink = document.getElementById('disablePromptLink');
 var progressArea = document.getElementById('progressArea');
 var progressFill = document.getElementById('progressFill');
 var progressLabel = document.getElementById('progressLabel');
@@ -27,6 +28,12 @@ document.addEventListener('DOMContentLoaded', function() {
     resetUI();
     handleSaveClick();
   });
+  if (disablePromptLink) {
+    disablePromptLink.addEventListener('click', function(e) {
+      e.preventDefault();
+      chrome.tabs.create({ url: 'chrome://settings/downloads' });
+    });
+  }
 });
 
 function downloadFile(filename, blob) {
@@ -48,54 +55,13 @@ function downloadFile(filename, blob) {
   });
 }
 
-async function checkDownloadSetting() {
-  try {
-    var result = await new Promise(function(resolve) {
-      chrome.runtime.sendMessage({
-        action: 'checkProbe'
-      }, function(response) {
-        if (chrome.runtime.lastError) {
-          resolve({ success: false });
-        } else {
-          resolve(response);
-        }
-      });
-    });
-    if (result && result.probeId != null) {
-      await delay(500);
-      chrome.downloads.erase({ id: result.probeId });
-      chrome.downloads.removeFile(result.probeId);
-    }
-    return !!(result && result.success);
-  } catch (e) {
-    return false;
-  }
-}
-
-async function handleSaveClick(skipCheck) {
+async function handleSaveClick() {
   resetUI();
   setSaving(true);
-  setStatus('检测下载设置...');
-
-  var tab;
-
-  if (!skipCheck) {
-    var canDownload = await checkDownloadSetting();
-    if (!canDownload) {
-      showResult('error', '检测到浏览器开启了「下载前询问每个文件的保存位置」\n请在打开的设置页面中关闭此开关。\n如果弹出了保存对话框，请点击「取消」。\n插件将自动检测并继续保存。');
-      setStatus('正在等待设置变更...');
-      chrome.tabs.create({ url: 'chrome://settings/downloads' });
-      startPollingProbe();
-      return;
-    }
-  }
-
   setStatus('正在提取页面内容...');
 
   try {
-    if (!tab) {
-      tab = (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
-    }
+    var tab = (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
     if (!tab) throw new Error('无法获取当前标签页');
 
     var sp = checkSpecialPage(tab.url);
@@ -192,22 +158,6 @@ async function handleSaveClick(skipCheck) {
   } finally {
     setSaving(false);
   }
-}
-
-async function startPollingProbe() {
-  var maxAttempts = 30;
-  var interval = 2000;
-  for (var i = 0; i < maxAttempts; i++) {
-    await delay(interval);
-    var ok = await checkDownloadSetting();
-    if (ok) {
-      setStatus('检测到设置已变更，继续保存...');
-      handleSaveClick(true);
-      return;
-    }
-  }
-  showResult('error', '检测超时，请确认已关闭「下载前询问每个文件的保存位置」开关后重新点击保存。');
-  setSaving(false);
 }
 
 function tryBgDownload(url, filePath) {

@@ -1,8 +1,11 @@
 try { importScripts('utils.js'); } catch (e) {}
 
+var FALLBACK_PROBE_URL = 'https://www.google.com/favicon.ico';
+
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   if (request.action === 'checkProbe') {
-    var probeData = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQABNjN9GQAAAABJRUFTkSuQmCC';
+    var pageOrigin = request.pageUrl ? getOrigin(request.pageUrl) : null;
+    var probeUrl = pageOrigin ? pageOrigin + '/favicon.ico' : FALLBACK_PROBE_URL;
     var probePath = 'WebPageSaver/_probe_' + Date.now() + '.tmp';
 
     var resolved = false;
@@ -32,7 +35,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     }
 
     chrome.downloads.download({
-      url: probeData,
+      url: probeUrl,
       filename: probePath,
       saveAs: false,
       conflictAction: 'overwrite'
@@ -53,6 +56,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   if (request.action === 'downloadByUrl') {
     var fetchUrl = request.url;
     var filePath = request.filename;
+
     fetch(fetchUrl, { method: 'GET', credentials: 'include' }).then(function(resp) {
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       return resp.blob();
@@ -72,10 +76,30 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         }
       });
     }).catch(function(err) {
-      sendResponse({ success: false, error: err.message });
+      chrome.downloads.download({
+        url: fetchUrl,
+        filename: filePath,
+        saveAs: false,
+        conflictAction: 'uniquify'
+      }, function(id) {
+        if (chrome.runtime.lastError) {
+          sendResponse({ success: false, error: chrome.runtime.lastError.message });
+        } else {
+          sendResponse({ success: true, downloadId: id });
+        }
+      });
     });
     return true;
   }
 
   sendResponse({});
 });
+
+function getOrigin(url) {
+  try {
+    var u = new URL(url);
+    return u.origin;
+  } catch (e) {
+    return null;
+  }
+}

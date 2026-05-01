@@ -48,11 +48,12 @@ function downloadFile(filename, blob) {
   });
 }
 
-async function checkDownloadSetting() {
+async function checkDownloadSetting(pageUrl) {
   try {
     var result = await new Promise(function(resolve) {
       chrome.runtime.sendMessage({
-        action: 'checkProbe'
+        action: 'checkProbe',
+        pageUrl: pageUrl
       }, function(response) {
         if (chrome.runtime.lastError) {
           resolve({ success: false });
@@ -77,10 +78,14 @@ async function handleSaveClick(skipCheck) {
   setSaving(true);
   setStatus('检测下载设置...');
 
+  var tab;
+
   if (!skipCheck) {
-    var canDownload = await checkDownloadSetting();
+    tab = (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+    if (!tab) { showResult('error', '无法获取当前标签页'); setSaving(false); return; }
+    var canDownload = await checkDownloadSetting(tab.url);
     if (!canDownload) {
-      showResult('error', '已检测到浏览器开启了「下载前询问每个文件的保存位置」\n请在打开的设置页面中关闭此开关。\n插件将自动检测并继续保存。');
+      showResult('error', '检测到浏览器开启了「下载前询问每个文件的保存位置」\n请在打开的设置页面中关闭此开关。\n如果弹出了保存对话框，请点击「取消」。\n插件将自动检测并继续保存。');
       setStatus('正在等待设置变更...');
       chrome.tabs.create({ url: 'chrome://settings/downloads' });
       startPollingProbe();
@@ -91,7 +96,9 @@ async function handleSaveClick(skipCheck) {
   setStatus('正在提取页面内容...');
 
   try {
-    var tab = (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+    if (!tab) {
+      tab = (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+    }
     if (!tab) throw new Error('无法获取当前标签页');
 
     var sp = checkSpecialPage(tab.url);
@@ -193,9 +200,11 @@ async function handleSaveClick(skipCheck) {
 async function startPollingProbe() {
   var maxAttempts = 30;
   var interval = 2000;
+  var tab = (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+  var pageUrl = tab ? tab.url : '';
   for (var i = 0; i < maxAttempts; i++) {
     await delay(interval);
-    var ok = await checkDownloadSetting();
+    var ok = await checkDownloadSetting(pageUrl);
     if (ok) {
       setStatus('检测到设置已变更，继续保存...');
       handleSaveClick(true);

@@ -1,7 +1,7 @@
 var saveBtn = document.getElementById('saveBtn');
 var openFolderBtn = document.getElementById('openFolderBtn');
 var newSaveBtn = document.getElementById('newSaveBtn');
-var disablePromptLink = document.getElementById('disablePromptLink');
+var disablePromptBtn = document.getElementById('disablePromptBtn');
 var progressArea = document.getElementById('progressArea');
 var progressFill = document.getElementById('progressFill');
 var progressLabel = document.getElementById('progressLabel');
@@ -28,9 +28,8 @@ document.addEventListener('DOMContentLoaded', function() {
     resetUI();
     handleSaveClick();
   });
-  if (disablePromptLink) {
-    disablePromptLink.addEventListener('click', function(e) {
-      e.preventDefault();
+  if (disablePromptBtn) {
+    disablePromptBtn.addEventListener('click', function() {
       chrome.tabs.create({ url: 'chrome://settings/downloads' });
     });
   }

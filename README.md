@@ -18,7 +18,7 @@
 ## 项目结构
 
 ```
-chrome-save-page-extension/
+WebPageSaver/
 ├── manifest.json          # 插件清单文件（Manifest V3）
 ├── background.js          # Service Worker 后台脚本，负责资源下载和文件保存
 ├── page-extractor.js      # 页面内容提取模块（共享逻辑，可被 content script 和 popup 复用）
@@ -70,7 +70,7 @@ cd WebPageSaver
 1. 打开 Google Chrome 浏览器，在地址栏输入 `chrome://extensions/` 并回车，进入扩展程序管理页面。
 2. 在页面右上角，打开「开发者模式」开关（Developer mode）。
 3. 点击左上角出现的「加载已解压的扩展程序」（Load unpacked）按钮。
-4. 在弹出的文件选择器中，选择本项目所在的文件夹 `chrome-save-page-extension`。
+4. 在弹出的文件选择器中，选择本项目所在的文件夹 `WebPageSaver`。
 5. 加载成功后，你会在扩展列表中看到「网页保存助手」，工具栏上也会出现插件图标。
 
 ### 3. 使用插件

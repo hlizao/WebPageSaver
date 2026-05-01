@@ -105,8 +105,8 @@ async function handleSaveClick() {
     statOthers.textContent = otherCount;
 
     var pageName = sanitizeFileName(response.title || tab.title || '未命名页面');
-    var mediaDir = pageName + '_media';
-    var htmlFile = ROOT_DIR + '/' + pageName + '.html';
+    var mediaDir = pageName + '/media';
+    var htmlFile = ROOT_DIR + '/' + pageName + '/index.html';
 
     setProgress(0, total + 1);
     setProgressLabel('正在保存 HTML 文件...');

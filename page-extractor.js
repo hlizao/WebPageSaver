@@ -222,6 +222,42 @@ async function buildOfflineHtml(mediaUrls, mediaDirName) {
     }
   });
 
+  const styleSheets = clone.querySelectorAll('style');
+  styleSheets.forEach(st => {
+    st.textContent = st.textContent.replace(/audio\s*\{[^}]*display\s*:\s*none[^}]*\}/gi, '');
+    st.textContent = st.textContent.replace(/\baudio\b[^{]*\{[^}]*\}[\s\S]*?display\s*:\s*none/g, '');
+  });
+
+  const body = clone.querySelector('body');
+  if (body) {
+    const mediaElements = body.querySelectorAll('audio, video');
+    mediaElements.forEach(el => {
+      if (!el.hasAttribute('data-offline-keep')) {
+        const cloneEl = el.cloneNode(true);
+        cloneEl.removeAttribute('data-offline-keep');
+        const tag = cloneEl.tagName.toLowerCase();
+        if (!cloneEl.hasAttribute('controls')) {
+          cloneEl.setAttribute('controls', '');
+        }
+        if (tag === 'video' && !cloneEl.hasAttribute('playsinline')) {
+          cloneEl.setAttribute('playsinline', '');
+        }
+        cloneEl.setAttribute('style',
+          'position:fixed;bottom:0;left:0;width:100%;z-index:9999;background:#fff;' +
+          (tag === 'audio' ? 'height:40px;' : 'max-height:300px;')
+        );
+        body.appendChild(cloneEl);
+      }
+    });
+  }
+
+  const head = clone.querySelector('head');
+  if (head) {
+    const overrideStyle = document.createElement('style');
+    overrideStyle.textContent = 'audio, video { display: block !important; } audio[controls] { display: block !important; } video[controls] { display: block !important; }';
+    head.appendChild(overrideStyle);
+  }
+
   const doctype = document.doctype
     ? '<!DOCTYPE ' + document.doctype.name +
       (document.doctype.publicId ? ' PUBLIC "' + document.doctype.publicId + '"' : '') +
@@ -280,6 +316,16 @@ function replaceElementUrls(el, urlToFilename, mediaPrefix) {
 
   if (el.hasAttribute('style')) {
     el.setAttribute('style', replaceUrlsInText(el.getAttribute('style'), urlToFilename, mediaPrefix));
+  }
+
+  const tag = el.tagName.toLowerCase();
+  if (tag === 'audio' || tag === 'video') {
+    if (!el.hasAttribute('controls')) {
+      el.setAttribute('controls', '');
+    }
+    if (tag === 'video' && !el.hasAttribute('playsinline')) {
+      el.setAttribute('playsinline', '');
+    }
   }
 }
 

@@ -75,16 +75,20 @@ async function checkDownloadSetting() {
   }
 }
 
-async function handleSaveClick() {
+async function handleSaveClick(skipCheck) {
   resetUI();
   setSaving(true);
   setStatus('检测下载设置...');
 
-  var canDownload = await checkDownloadSetting();
-  if (!canDownload) {
-    showResult('error', '检测到浏览器开启了「下载前询问每个文件的保存位置」\n请关闭此功能后再使用本插件。\n关闭方法：关闭「下载前询问每个文件的保存位置」开关');
-    setSaving(false);
-    return;
+  if (!skipCheck) {
+    var canDownload = await checkDownloadSetting();
+    if (!canDownload) {
+      showResult('error', '已检测到浏览器开启了「下载前询问每个文件的保存位置」\n请在打开的设置页面中关闭此开关。\n插件将自动检测并继续保存。');
+      setStatus('正在等待设置变更...');
+      chrome.tabs.create({ url: 'chrome://settings/downloads' });
+      startPollingProbe();
+      return;
+    }
   }
 
   setStatus('正在提取页面内容...');
@@ -187,6 +191,22 @@ async function handleSaveClick() {
   } finally {
     setSaving(false);
   }
+}
+
+async function startPollingProbe() {
+  var maxAttempts = 30;
+  var interval = 2000;
+  for (var i = 0; i < maxAttempts; i++) {
+    await delay(interval);
+    var ok = await checkDownloadSetting();
+    if (ok) {
+      setStatus('检测到设置已变更，继续保存...');
+      handleSaveClick(true);
+      return;
+    }
+  }
+  showResult('error', '检测超时，请确认已关闭「下载前询问每个文件的保存位置」开关后重新点击保存。');
+  setSaving(false);
 }
 
 async function tryFetchDownload(url, filePath) {

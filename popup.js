@@ -1,7 +1,6 @@
 var saveBtn = document.getElementById('saveBtn');
 var openFolderBtn = document.getElementById('openFolderBtn');
 var newSaveBtn = document.getElementById('newSaveBtn');
-var settingsLink = document.getElementById('settingsLink');
 var progressArea = document.getElementById('progressArea');
 var progressFill = document.getElementById('progressFill');
 var progressLabel = document.getElementById('progressLabel');
@@ -28,11 +27,6 @@ document.addEventListener('DOMContentLoaded', function() {
     resetUI();
     handleSaveClick();
   });
-  if (settingsLink) {
-    settingsLink.addEventListener('click', function() {
-      chrome.tabs.create({ url: 'chrome://settings/downloads' });
-    });
-  }
 });
 
 function downloadFile(filename, blob) {
@@ -55,28 +49,28 @@ function downloadFile(filename, blob) {
 }
 
 async function checkDownloadSetting() {
-  var probeBlob = new Blob(['.'], { type: 'text/plain' });
-  var probeUrl = URL.createObjectURL(probeBlob);
+  var timestamp = Date.now();
+  var probeFilename = '__probe_' + timestamp + '.ico';
   try {
-    var probeId = await new Promise(function(resolve, reject) {
-      chrome.downloads.download({
-        url: probeUrl,
-        filename: '__probe_remove__.txt',
-        saveAs: false
-      }, function(id) {
-        URL.revokeObjectURL(probeUrl);
+    var result = await new Promise(function(resolve) {
+      chrome.runtime.sendMessage({
+        action: 'checkProbe',
+        filename: probeFilename
+      }, function(response) {
         if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
+          resolve({ success: false });
         } else {
-          resolve(id);
+          resolve(response);
         }
       });
     });
-    chrome.downloads.erase({ id: probeId });
-    chrome.downloads.removeFile(probeId);
-    return true;
+    if (result && result.probeId != null) {
+      await delay(500);
+      chrome.downloads.erase({ id: result.probeId });
+      chrome.downloads.removeFile(result.probeId);
+    }
+    return !!(result && result.success);
   } catch (e) {
-    URL.revokeObjectURL(probeUrl);
     return false;
   }
 }
@@ -88,11 +82,8 @@ async function handleSaveClick() {
 
   var canDownload = await checkDownloadSetting();
   if (!canDownload) {
-    showResult('error', '检测到浏览器开启了「下载前询问每个文件的保存位置」，\n请点击下方的「设置」按钮关闭此功能，\n然后重新尝试保存。');
+    showResult('error', '检测到浏览器开启了「下载前询问每个文件的保存位置」\n请关闭此功能后再使用本插件。\n关闭方法：关闭「下载前询问每个文件的保存位置」开关');
     setSaving(false);
-    if (settingsLink) {
-      settingsLink.textContent = '打开下载设置';
-    }
     return;
   }
 
@@ -176,15 +167,8 @@ async function handleSaveClick() {
 
         var filePath = ROOT_DIR + '/' + mediaDir + '/' + uniqueName;
 
-        // Method 1: try direct URL download via chrome.downloads.download
-        var directOk = await tryDirectDownload(url, filePath);
-        if (directOk) {
-          downloadedCount++;
-        } else {
-          // Method 2: fetch + blob download
-          var blobOk = await tryFetchDownload(url, filePath);
-          if (blobOk) downloadedCount++;
-        }
+        var blobOk = await tryFetchDownload(url, filePath);
+        if (blobOk) downloadedCount++;
       } catch (e) {
         console.warn('跳过:', url, e.message);
       }
@@ -203,24 +187,6 @@ async function handleSaveClick() {
   } finally {
     setSaving(false);
   }
-}
-
-function tryDirectDownload(url, filePath) {
-  return new Promise(function(resolve) {
-    try {
-      chrome.downloads.download({
-        url: url,
-        filename: filePath,
-        saveAs: false,
-        conflictAction: 'uniquify'
-      }, function(id) {
-        if (chrome.runtime.lastError) resolve(false);
-        else resolve(true);
-      });
-    } catch (e) {
-      resolve(false);
-    }
-  });
 }
 
 async function tryFetchDownload(url, filePath) {
@@ -252,7 +218,6 @@ function resetUI() {
   statImages.textContent = '-';
   statOthers.textContent = '-';
   savedDownloadId = null;
-  if (settingsLink) settingsLink.textContent = '设置';
 }
 
 function setSaving(active) {

@@ -21,9 +21,7 @@ async function extractPage() {
 
 function sanitizeMediaDirName(name) {
   if (!name) return 'page_media';
-  let safe = name.replace(/[\\/:*?"<>|]/g, '_').trim();
-  if (safe.length > 100) safe = safe.substring(0, 100);
-  return safe + '_media';
+  return 'media';
 }
 
 function extractMediaUrls() {

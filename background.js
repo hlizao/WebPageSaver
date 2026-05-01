@@ -1,55 +1,81 @@
 try { importScripts('utils.js'); } catch (e) {}
 
-var PROBE_URL = 'https://www.google.com/favicon.ico';
-var probeCallbacks = {};
-
-chrome.downloads.onChanged.addListener(function(delta) {
-  if (probeCallbacks[delta.id]) {
-    var handled = probeCallbacks[delta.id](delta);
-    if (handled) {
-      delete probeCallbacks[delta.id];
-    }
-  }
-});
-
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   if (request.action === 'checkProbe') {
-    chrome.downloads.download({
-      url: PROBE_URL,
-      filename: request.filename,
-      saveAs: false
-    }, function(id) {
-      if (chrome.runtime.lastError) {
-        sendResponse({ success: false });
-      } else {
-        var timer = setTimeout(function() {
-          if (probeCallbacks[id]) {
-            delete probeCallbacks[id];
-            chrome.downloads.search({ id: id }, function(items) {
-              if (items && items.length > 0 && items[0].exists) {
-                sendResponse({ success: true, probeId: id });
-              } else {
-                sendResponse({ success: false, probeId: id });
-              }
-            });
-          }
-        }, 3000);
-        probeCallbacks[id] = function(delta) {
-          if (delta.state) {
-            clearTimeout(timer);
-            if (delta.state.current === 'complete') {
-              sendResponse({ success: true, probeId: id });
-              return true;
-            } else if (delta.state.current === 'interrupted') {
-              sendResponse({ success: false, probeId: id });
-              return true;
-            }
-          }
-          return false;
-        };
+    var probeData = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQABNjN9GQAAAABJRUFTkSuQmCC';
+    var probePath = 'WebPageSaver/_probe_' + Date.now() + '.tmp';
+
+    var resolved = false;
+    var downloadId = null;
+
+    var listener = function(delta) {
+      if (downloadId === null || delta.id !== downloadId) return;
+      if (delta.state) {
+        if (delta.state.current === 'complete') finish(true);
+        else if (delta.state.current === 'interrupted') finish(false);
       }
+    };
+    chrome.downloads.onChanged.addListener(listener);
+
+    var timeout = setTimeout(function() { finish(false); }, 3000);
+
+    function finish(ok) {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeout);
+      chrome.downloads.onChanged.removeListener(listener);
+      if (downloadId != null) {
+        try { chrome.downloads.removeFile(downloadId); } catch (e) {}
+        try { chrome.downloads.erase({ id: downloadId }); } catch (e) {}
+      }
+      sendResponse({ success: ok, probeId: downloadId });
+    }
+
+    chrome.downloads.download({
+      url: probeData,
+      filename: probePath,
+      saveAs: false,
+      conflictAction: 'overwrite'
+    }, function(id) {
+      if (chrome.runtime.lastError || !id) { finish(false); return; }
+      downloadId = id;
+      chrome.downloads.search({ id: id }, function(results) {
+        if (results && results.length > 0) {
+          if (results[0].state === 'complete') finish(true);
+          else if (results[0].state === 'interrupted') finish(false);
+        }
+      });
+    });
+
+    return true;
+  }
+
+  if (request.action === 'downloadByUrl') {
+    var fetchUrl = request.url;
+    var filePath = request.filename;
+    fetch(fetchUrl, { method: 'GET', credentials: 'include' }).then(function(resp) {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.blob();
+    }).then(function(blob) {
+      var url = URL.createObjectURL(blob);
+      chrome.downloads.download({
+        url: url,
+        filename: filePath,
+        saveAs: false,
+        conflictAction: 'uniquify'
+      }, function(id) {
+        URL.revokeObjectURL(url);
+        if (chrome.runtime.lastError) {
+          sendResponse({ success: false, error: chrome.runtime.lastError.message });
+        } else {
+          sendResponse({ success: true, downloadId: id });
+        }
+      });
+    }).catch(function(err) {
+      sendResponse({ success: false, error: err.message });
     });
     return true;
   }
+
   sendResponse({});
 });

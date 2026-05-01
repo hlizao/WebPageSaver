@@ -49,13 +49,10 @@ function downloadFile(filename, blob) {
 }
 
 async function checkDownloadSetting() {
-  var timestamp = Date.now();
-  var probeFilename = '__probe_' + timestamp + '.ico';
   try {
     var result = await new Promise(function(resolve) {
       chrome.runtime.sendMessage({
-        action: 'checkProbe',
-        filename: probeFilename
+        action: 'checkProbe'
       }, function(response) {
         if (chrome.runtime.lastError) {
           resolve({ success: false });
@@ -171,8 +168,8 @@ async function handleSaveClick(skipCheck) {
 
         var filePath = ROOT_DIR + '/' + mediaDir + '/' + uniqueName;
 
-        var blobOk = await tryFetchDownload(url, filePath);
-        if (blobOk) downloadedCount++;
+        var ok = await tryBgDownload(url, filePath);
+        if (ok) downloadedCount++;
       } catch (e) {
         console.warn('跳过:', url, e.message);
       }
@@ -209,21 +206,20 @@ async function startPollingProbe() {
   setSaving(false);
 }
 
-async function tryFetchDownload(url, filePath) {
-  for (var attempt = 1; attempt <= 2; attempt++) {
-    try {
-      var response = await fetch(url, { method: 'GET', credentials: 'include' });
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      var blob = await response.blob();
-      await downloadFile(filePath, blob);
-      return true;
-    } catch (e) {
-      if (attempt < 2) {
-        await new Promise(function(r) { setTimeout(r, 1000); });
+function tryBgDownload(url, filePath) {
+  return new Promise(function(resolve) {
+    chrome.runtime.sendMessage({
+      action: 'downloadByUrl',
+      url: url,
+      filename: filePath
+    }, function(response) {
+      if (chrome.runtime.lastError || !response || !response.success) {
+        resolve(false);
+      } else {
+        resolve(true);
       }
-    }
-  }
-  return false;
+    });
+  });
 }
 
 function resetUI() {

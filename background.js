@@ -1,11 +1,9 @@
 try { importScripts('utils.js'); } catch (e) {}
 
-var FALLBACK_PROBE_URL = 'https://www.google.com/favicon.ico';
+var PROBE_URL = 'https://www.google.com/favicon.ico';
 
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   if (request.action === 'checkProbe') {
-    var pageOrigin = request.pageUrl ? getOrigin(request.pageUrl) : null;
-    var probeUrl = pageOrigin ? pageOrigin + '/favicon.ico' : FALLBACK_PROBE_URL;
     var probePath = 'WebPageSaver/_probe_' + Date.now() + '.tmp';
 
     var resolved = false;
@@ -35,7 +33,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     }
 
     chrome.downloads.download({
-      url: probeUrl,
+      url: PROBE_URL,
       filename: probePath,
       saveAs: false,
       conflictAction: 'overwrite'
@@ -94,12 +92,3 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
 
   sendResponse({});
 });
-
-function getOrigin(url) {
-  try {
-    var u = new URL(url);
-    return u.origin;
-  } catch (e) {
-    return null;
-  }
-}

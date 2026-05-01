@@ -14,6 +14,7 @@
 - **特殊页面检测**：自动检测 `chrome://`、`about:blank`、`file://` 等特殊页面，给出友好提示。
 - **Content Script 自动注入**：当页面未加载 content script 时，自动通过 `chrome.scripting.executeScript` 注入提取逻辑。
 - **中文界面**：插件弹窗和代码注释均为中文，易于理解和使用。
+- **离线播放支持**：为 `<audio>`/`<video>` 添加 `controls` 属性并修复隐藏 CSS，将播放器移到页面底部独立显示，确保 JS 驱动的播放器在离线环境下仍可通过原生控件播放媒体。
 
 ## 项目结构
 
@@ -80,21 +81,21 @@ cd WebPageSaver
 3. 在弹出的窗口中点击「保存当前网页」按钮，关闭浏览器“下载前询问”设置。
 4. 插件会自动提取页面内容和媒体资源。
 5. 保存完成后，你可以在 Chrome 的默认下载目录中找到如下文件结构：
-   ```
-   下载目录/
-   └── WebPageSaver/
-       ├── 页面标题.html
-       └── 页面标题_media/
-           ├── pictures/
-           │   ├── cover.jpg
-           │   ├── avatar_small.png       # CDN @后缀自动转换
-           │   └── icon.svg
-           ├── videos/
-           │   └── clip.mp4
-           └── audios/
-               └── episode.m4a            # 含嵌入JSON提取
-   ```
-7. 双击打开 `.html` 文件，即可在离线状态下完整查看保存的网页。
+```
+    下载目录/
+    └── WebPageSaver/
+        └── 页面标题/
+            ├── index.html              # 离线页面入口
+            └── media/
+                ├── pictures/
+                │   ├── cover.jpg
+                │   └── avatar_small.png
+                ├── videos/
+                │   └── clip.mp4
+                └── audios/
+                    └── episode.m4a     # 含嵌入JSON提取
+    ```
+7. 双击打开 `index.html` 文件，即可在离线状态下完整查看保存的网页。图片可直接显示，音频/视频可通过页面底部的原生播放器控件播放。
 
 ## 注意事项
 
@@ -103,6 +104,7 @@ cd WebPageSaver
 - **跨域资源**：虽然插件尝试通过 `fetch` 下载跨域资源，但某些网站可能设置了严格的 CORS 策略或防盗链机制，导致部分资源无法下载。此时 HTML 文件中对应的资源链接可能失效，但页面整体结构仍然完整。
 - **动态内容**：插件保存的是当前时刻的页面快照。如果页面内容是通过 JavaScript 动态加载的（如懒加载图片、无限滚动），建议在页面完全加载后再执行保存操作。
 - **大文件视频**：对于体积较大的视频文件，下载可能需要较长时间，请耐心等待进度完成。
+- **离线播放**：对于使用 JavaScript 驱动播放器的 SPA 网站（如播客平台、视频网站等），保存的 HTML 中的 JS 播放器在离线环境下可能失效。插件会自动在页面底部添加原生 `<audio>`/`<video controls>` 播放器，确保仍可通过浏览器自带控件播放媒体文件。
 - **图标文件**：项目中 `icons/` 目录下的 `icon16.png`、`icon48.png`、`icon128.png` 为占位文件，建议替换为你自己设计的图标，以获得更好的视觉效果。
 
 ## 技术细节
@@ -119,7 +121,7 @@ cd WebPageSaver
   - `source` 标签的 `src` 和 `srcset`
   - 内联 `style` 和 `style` 标签中的 `background-image`
   - 外部 CSS 样式表中的 `url(...)` 引用（在允许访问的情况下）
-- `buildOfflineHtml()`：克隆整个 `document.documentElement`，将所有媒体资源的绝对 URL 替换为 `./media/文件名` 的相对路径，确保离线可用。
+- `buildOfflineHtml()`：克隆整个 `document.documentElement`，将所有媒体资源的绝对 URL 替换为 `./media/文件名` 的相对路径，确保离线可用。同时自动为 `<audio>`/`<video>` 添加 `controls` 和 `playsinline` 属性，清理隐藏播放器的 CSS 规则，并在页面底部插入固定的原生播放器，解决 SPA 页面 JS 播放器离线失效的问题。
 - `getLocalFilename()` / `getMediaCategory()`：根据文件扩展名判断媒体类型，生成带分类目录的本地文件名。
 
 该模块被 `content.js` 和 `popup.js` 共享复用，避免了代码重复。

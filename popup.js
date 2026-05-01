@@ -12,6 +12,8 @@ var resultText = document.getElementById('resultText');
 var resultIcon = document.getElementById('resultIcon');
 var statMedia = document.getElementById('statMedia');
 var statImages = document.getElementById('statImages');
+var statVideo = document.getElementById('statVideo');
+var statAudio = document.getElementById('statAudio');
 var statOthers = document.getElementById('statOthers');
 
 var ROOT_DIR = 'WebPageSaver';
@@ -83,13 +85,24 @@ async function handleSaveClick() {
     if (!response || !response.success) throw new Error(response ? response.error : '页面提取失败');
 
     var total = response.mediaUrls.length;
-    var imgCount = response.mediaUrls.filter(function(u) {
-      var ext = u.split('?')[0].split('.').pop().toLowerCase();
-      return ['jpg','jpeg','png','gif','webp','svg','bmp','ico','avif'].indexOf(ext) >= 0;
-    }).length;
+
+    function countByExts(urls, exts) {
+      return urls.filter(function(u) {
+        var ext = u.split('?')[0].split('.').pop().toLowerCase();
+        return exts.indexOf(ext) >= 0;
+      }).length;
+    }
+
+    var imgCount = countByExts(response.mediaUrls, MEDIA_CATEGORIES.pictures);
+    var videoCount = countByExts(response.mediaUrls, MEDIA_CATEGORIES.videos);
+    var audioCount = countByExts(response.mediaUrls, MEDIA_CATEGORIES.audios);
+    var otherCount = total - imgCount - videoCount - audioCount;
+
     statMedia.textContent = total;
     statImages.textContent = imgCount;
-    statOthers.textContent = total - imgCount;
+    statVideo.textContent = videoCount;
+    statAudio.textContent = audioCount;
+    statOthers.textContent = otherCount;
 
     var pageName = sanitizeFileName(response.title || tab.title || '未命名页面');
     var mediaDir = pageName + '_media';
@@ -185,6 +198,8 @@ function resetUI() {
   newSaveBtn.classList.add('hidden');
   statMedia.textContent = '-';
   statImages.textContent = '-';
+  statVideo.textContent = '-';
+  statAudio.textContent = '-';
   statOthers.textContent = '-';
   savedDownloadId = null;
 }
